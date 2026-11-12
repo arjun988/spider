@@ -290,7 +290,7 @@ def upgrade() -> None:
         sa.Column("findings_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("published_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("rejected_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("github_review_id", sa.Integer(), nullable=True),
+        sa.Column("github_review_id", sa.BigInteger(), nullable=True),
         sa.Column("input_tokens", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("output_tokens", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("estimated_cost_usd", sa.Float(), nullable=False, server_default="0"),

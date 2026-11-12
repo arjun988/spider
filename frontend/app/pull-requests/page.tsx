@@ -25,6 +25,7 @@ export default function PullRequestsPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["pull-requests"],
     queryFn: () => api.pullRequests(),
+    refetchInterval: 15_000,
   });
 
   return (

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -53,7 +54,7 @@ class ReviewJob(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     findings_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     published_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     rejected_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    github_review_id: Mapped[int | None] = mapped_column(nullable=True)
+    github_review_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)

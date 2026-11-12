@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-import uuid
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
-from app.api.deps import get_db_session
+from app.api.routes.github import get_sync_db
 from app.core.config import settings as app_settings
 from app.core.encryption import encrypt_value, mask_secret
 from app.models.organization import Organization
 from app.models.settings import ModelConfiguration
+from app.services.cost_service import budget_remaining
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -33,6 +32,7 @@ class GeminiConfigOut(BaseModel):
     max_files_per_review: int
     context_retrieval_limit: int
     monthly_budget_usd: float
+    budget: dict | None = None
 
 
 class GeminiConfigUpdate(BaseModel):
@@ -47,6 +47,7 @@ class GeminiConfigUpdate(BaseModel):
     max_files_per_review: int | None = Field(default=None, ge=1, le=500)
     context_retrieval_limit: int | None = Field(default=None, ge=1, le=100)
     monthly_budget_usd: float | None = Field(default=None, ge=0.0)
+    validate_key: bool = True
 
 
 class SystemStatusOut(BaseModel):
@@ -57,22 +58,20 @@ class SystemStatusOut(BaseModel):
     app_name: str
 
 
-async def _ensure_default_org(db: AsyncSession) -> Organization:
-    result = await db.execute(select(Organization).limit(1))
-    org = result.scalar_one_or_none()
+def _ensure_default_org(db: Session) -> Organization:
+    org = db.execute(select(Organization).limit(1)).scalar_one_or_none()
     if org:
         return org
     org = Organization(name="Default", slug="default")
     db.add(org)
-    await db.flush()
+    db.flush()
     return org
 
 
-async def _get_or_create_config(db: AsyncSession, org: Organization) -> ModelConfiguration:
-    result = await db.execute(
+def _get_or_create_config(db: Session, org: Organization) -> ModelConfiguration:
+    config = db.execute(
         select(ModelConfiguration).where(ModelConfiguration.organization_id == org.id)
-    )
-    config = result.scalar_one_or_none()
+    ).scalar_one_or_none()
     if config:
         return config
     config = ModelConfiguration(
@@ -87,13 +86,13 @@ async def _get_or_create_config(db: AsyncSession, org: Organization) -> ModelCon
         config.encrypted_api_key = encrypt_value(app_settings.gemini_api_key)
         config.api_key_last_four = app_settings.gemini_api_key[-4:]
         config.connection_status = "connected"
-        config.api_key_validated = False  # validated on explicit save/validate
+        config.api_key_validated = False
     db.add(config)
-    await db.flush()
+    db.flush()
     return config
 
 
-def _config_to_out(config: ModelConfiguration) -> GeminiConfigOut:
+def _config_to_out(db: Session, config: ModelConfiguration) -> GeminiConfigOut:
     return GeminiConfigOut(
         configured=bool(config.encrypted_api_key),
         api_key_masked=mask_secret(f"****{config.api_key_last_four}") if config.api_key_last_four else None,
@@ -109,11 +108,12 @@ def _config_to_out(config: ModelConfiguration) -> GeminiConfigOut:
         max_files_per_review=config.max_files_per_review,
         context_retrieval_limit=config.context_retrieval_limit,
         monthly_budget_usd=config.monthly_budget_usd,
+        budget=budget_remaining(db, config.organization_id),
     )
 
 
 @router.get("/system", response_model=SystemStatusOut)
-async def system_status() -> SystemStatusOut:
+def system_status() -> SystemStatusOut:
     return SystemStatusOut(
         github_app_configured=app_settings.github_app_configured,
         github_app_id=app_settings.github_app_id or None,
@@ -124,33 +124,42 @@ async def system_status() -> SystemStatusOut:
 
 
 @router.get("/gemini", response_model=GeminiConfigOut)
-async def get_gemini_config(db: AsyncSession = Depends(get_db_session)) -> GeminiConfigOut:
-    org = await _ensure_default_org(db)
-    config = await _get_or_create_config(db, org)
-    return _config_to_out(config)
+def get_gemini_config(db: Session = Depends(get_sync_db)) -> GeminiConfigOut:
+    org = _ensure_default_org(db)
+    config = _get_or_create_config(db, org)
+    return _config_to_out(db, config)
 
 
 @router.put("/gemini", response_model=GeminiConfigOut)
-async def update_gemini_config(
-    body: GeminiConfigUpdate,
-    db: AsyncSession = Depends(get_db_session),
-) -> GeminiConfigOut:
-    org = await _ensure_default_org(db)
-    config = await _get_or_create_config(db, org)
+def update_gemini_config(body: GeminiConfigUpdate, db: Session = Depends(get_sync_db)) -> GeminiConfigOut:
+    org = _ensure_default_org(db)
+    config = _get_or_create_config(db, org)
 
     if body.api_key is not None:
         key = body.api_key.strip()
         if key:
-            # Validate key format; full live validation in Phase 6
             if len(key) < 20:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="API key appears invalid",
-                )
+                raise HTTPException(status_code=400, detail="API key appears invalid")
+            if body.validate_key:
+                try:
+                    from app.services.gemini_client import validate_api_key
+
+                    model = body.primary_model or config.primary_model
+                    ok = validate_api_key(key, model)
+                    if not ok:
+                        raise HTTPException(status_code=400, detail="Gemini API key validation failed")
+                    config.api_key_validated = True
+                    config.connection_status = "connected"
+                except HTTPException:
+                    raise
+                except Exception as exc:
+                    config.connection_status = "error"
+                    raise HTTPException(status_code=400, detail=f"Key validation error: {exc}") from exc
             config.encrypted_api_key = encrypt_value(key)
             config.api_key_last_four = key[-4:]
-            config.connection_status = "connected"
-            config.api_key_validated = True
+            if not body.validate_key:
+                config.connection_status = "connected"
+                config.api_key_validated = False
         else:
             config.encrypted_api_key = None
             config.api_key_last_four = None
@@ -173,5 +182,26 @@ async def update_gemini_config(
         if value is not None:
             setattr(config, field, value)
 
-    await db.flush()
-    return _config_to_out(config)
+    db.flush()
+    return _config_to_out(db, config)
+
+
+@router.post("/gemini/validate")
+def validate_gemini(db: Session = Depends(get_sync_db)) -> dict:
+    org = _ensure_default_org(db)
+    config = _get_or_create_config(db, org)
+    if not config.encrypted_api_key:
+        raise HTTPException(status_code=400, detail="No API key configured")
+    from app.core.encryption import decrypt_value
+    from app.services.gemini_client import validate_api_key
+
+    try:
+        ok = validate_api_key(decrypt_value(config.encrypted_api_key), config.primary_model)
+        config.api_key_validated = ok
+        config.connection_status = "connected" if ok else "invalid"
+        db.flush()
+        return {"valid": ok, "connection_status": config.connection_status}
+    except Exception as exc:
+        config.connection_status = "error"
+        db.flush()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

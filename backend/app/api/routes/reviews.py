@@ -9,11 +9,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import get_db_session
-from app.models.review import ReviewFinding, ReviewJob
+from app.api.routes.github import get_sync_db
+from app.models.review import ReviewJob
 
 router = APIRouter(prefix="/reviews", tags=["reviews"])
 
@@ -63,31 +62,23 @@ class ReviewJobOut(BaseModel):
 
 
 @router.get("/{review_id}", response_model=ReviewJobOut)
-async def get_review(
-    review_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db_session),
-) -> ReviewJobOut:
-    result = await db.execute(
+def get_review(review_id: uuid.UUID, db: Session = Depends(get_sync_db)) -> ReviewJobOut:
+    job = db.execute(
         select(ReviewJob)
         .where(ReviewJob.id == review_id)
         .options(selectinload(ReviewJob.findings))
-    )
-    job = result.scalar_one_or_none()
+    ).scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found")
     return ReviewJobOut.model_validate(job)
 
 
 @router.get("/by-pr/{pr_id}", response_model=list[ReviewJobOut])
-async def list_reviews_for_pr(
-    pr_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db_session),
-) -> list[ReviewJobOut]:
-    result = await db.execute(
+def list_reviews_for_pr(pr_id: uuid.UUID, db: Session = Depends(get_sync_db)) -> list[ReviewJobOut]:
+    jobs = db.execute(
         select(ReviewJob)
         .where(ReviewJob.pull_request_id == pr_id)
         .options(selectinload(ReviewJob.findings))
         .order_by(ReviewJob.created_at.desc())
-    )
-    jobs = result.scalars().all()
+    ).scalars().all()
     return [ReviewJobOut.model_validate(j) for j in jobs]

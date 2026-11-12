@@ -1,4 +1,4 @@
-"""Repository listing endpoints (Phase 1 shell — discovery in Phase 2)."""
+"""Repository listing and indexing actions."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
-from app.api.deps import get_db_session
+from app.api.routes.github import get_sync_db
 from app.models.repository import Repository
 
 router = APIRouter(prefix="/repositories", tags=["repositories"])
@@ -39,9 +39,8 @@ class RepositoryListResponse(BaseModel):
 
 
 @router.get("", response_model=RepositoryListResponse)
-async def list_repositories(db: AsyncSession = Depends(get_db_session)) -> RepositoryListResponse:
-    result = await db.execute(select(Repository).order_by(Repository.full_name))
-    repos = result.scalars().all()
+def list_repositories(db: Session = Depends(get_sync_db)) -> RepositoryListResponse:
+    repos = db.execute(select(Repository).order_by(Repository.full_name)).scalars().all()
     return RepositoryListResponse(
         items=[RepositoryOut.model_validate(r) for r in repos],
         total=len(repos),
@@ -49,11 +48,30 @@ async def list_repositories(db: AsyncSession = Depends(get_db_session)) -> Repos
 
 
 @router.get("/{repository_id}", response_model=RepositoryOut)
-async def get_repository(
-    repository_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db_session),
-) -> RepositoryOut:
-    repo = await db.get(Repository, repository_id)
+def get_repository(repository_id: uuid.UUID, db: Session = Depends(get_sync_db)) -> RepositoryOut:
+    repo = db.get(Repository, repository_id)
     if not repo:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found")
     return RepositoryOut.model_validate(repo)
+
+
+@router.post("/{repository_id}/reindex")
+def reindex_repository(repository_id: uuid.UUID, full: bool = True, db: Session = Depends(get_sync_db)) -> dict:
+    repo = db.get(Repository, repository_id)
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    repo.indexing_status = "pending"
+    db.flush()
+    from app.workers.tasks import index_repository
+
+    task = index_repository.delay(str(repository_id), full)
+    return {"status": "queued", "task_id": task.id, "repository_id": str(repository_id)}
+
+
+@router.post("/{repository_id}/auto-review")
+def set_auto_review(repository_id: uuid.UUID, enabled: bool = True, db: Session = Depends(get_sync_db)) -> dict:
+    repo = db.get(Repository, repository_id)
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    repo.auto_review_enabled = enabled
+    return {"id": str(repo.id), "auto_review_enabled": repo.auto_review_enabled}

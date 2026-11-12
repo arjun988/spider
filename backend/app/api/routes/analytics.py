@@ -1,19 +1,20 @@
-"""Overview analytics endpoints — metrics derived from database records."""
+"""Overview and usage analytics — metrics from database records only."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
-from app.api.deps import get_db_session
+from app.api.routes.github import get_sync_db
 from app.models.pull_request import PullRequest
 from app.models.repository import Repository
 from app.models.review import ReviewFinding, ReviewJob
 from app.models.usage import ApiUsageRecord
+from app.services.analytics_service import cost_per_repo, model_breakdown, review_volume, usage_timeseries
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -35,44 +36,38 @@ class OverviewResponse(BaseModel):
 
 
 @router.get("/overview", response_model=OverviewResponse)
-async def get_overview(db: AsyncSession = Depends(get_db_session)) -> OverviewResponse:
-    total_repos = await db.scalar(select(func.count()).select_from(Repository)) or 0
-
-    completed_jobs = select(ReviewJob).where(ReviewJob.status == "completed")
-    total_prs = await db.scalar(
+def get_overview(db: Session = Depends(get_sync_db)) -> OverviewResponse:
+    total_repos = db.scalar(select(func.count()).select_from(Repository)) or 0
+    total_prs = db.scalar(
         select(func.count()).select_from(ReviewJob).where(ReviewJob.status == "completed")
     ) or 0
-
-    total_findings = await db.scalar(select(func.count()).select_from(ReviewFinding)) or 0
-    critical = await db.scalar(
+    total_findings = db.scalar(select(func.count()).select_from(ReviewFinding)) or 0
+    critical = db.scalar(
         select(func.count()).select_from(ReviewFinding).where(ReviewFinding.severity == "critical")
     ) or 0
-    high = await db.scalar(
+    high = db.scalar(
         select(func.count()).select_from(ReviewFinding).where(ReviewFinding.severity == "high")
     ) or 0
-
-    avg_duration = await db.scalar(
+    avg_duration = db.scalar(
         select(func.avg(ReviewJob.duration_ms)).where(
             ReviewJob.status == "completed",
             ReviewJob.duration_ms.isnot(None),
         )
     )
-
-    total_spend = await db.scalar(
+    total_spend = db.scalar(
         select(func.coalesce(func.sum(ApiUsageRecord.estimated_cost_usd), 0.0))
     ) or 0.0
 
-    recent_result = await db.execute(
+    recent_jobs = db.execute(
         select(ReviewJob)
         .where(ReviewJob.status.in_(["completed", "failed"]))
         .order_by(ReviewJob.created_at.desc())
         .limit(10)
-    )
-    recent_jobs = recent_result.scalars().all()
+    ).scalars().all()
 
     recent_reviews = []
     for job in recent_jobs:
-        pr = await db.get(PullRequest, job.pull_request_id)
+        pr = db.get(PullRequest, job.pull_request_id)
         recent_reviews.append(
             {
                 "id": str(job.id),
@@ -99,3 +94,13 @@ async def get_overview(db: AsyncSession = Depends(get_db_session)) -> OverviewRe
         ),
         generated_at=datetime.now(timezone.utc),
     )
+
+
+@router.get("/usage")
+def get_usage(days: int = Query(default=30, ge=1, le=365), db: Session = Depends(get_sync_db)) -> dict:
+    return {
+        "timeseries": usage_timeseries(db, days=days),
+        "models": model_breakdown(db, days=days),
+        "reviews": review_volume(db, days=days),
+        "by_repository": cost_per_repo(db),
+    }

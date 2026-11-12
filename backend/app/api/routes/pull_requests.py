@@ -8,9 +8,9 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
-from app.api.deps import get_db_session
+from app.api.routes.github import get_sync_db
 from app.models.pull_request import PullRequest
 from app.models.repository import Repository
 
@@ -43,12 +43,12 @@ class PullRequestListResponse(BaseModel):
 
 
 @router.get("", response_model=PullRequestListResponse)
-async def list_pull_requests(
+def list_pull_requests(
     repository_id: uuid.UUID | None = None,
     review_status: str | None = None,
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
-    db: AsyncSession = Depends(get_db_session),
+    db: Session = Depends(get_sync_db),
 ) -> PullRequestListResponse:
     query = select(PullRequest).order_by(PullRequest.created_at.desc())
     if repository_id:
@@ -56,28 +56,56 @@ async def list_pull_requests(
     if review_status:
         query = query.where(PullRequest.review_status == review_status)
 
-    result = await db.execute(query.offset(offset).limit(limit))
-    prs = result.scalars().all()
-
+    prs = db.execute(query.offset(offset).limit(limit)).scalars().all()
     items: list[PullRequestOut] = []
     for pr in prs:
         out = PullRequestOut.model_validate(pr)
-        repo = await db.get(Repository, pr.repository_id)
+        repo = db.get(Repository, pr.repository_id)
         out.repository_full_name = repo.full_name if repo else None
         items.append(out)
-
     return PullRequestListResponse(items=items, total=len(items))
 
 
 @router.get("/{pr_id}", response_model=PullRequestOut)
-async def get_pull_request(
-    pr_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db_session),
-) -> PullRequestOut:
-    pr = await db.get(PullRequest, pr_id)
+def get_pull_request(pr_id: uuid.UUID, db: Session = Depends(get_sync_db)) -> PullRequestOut:
+    pr = db.get(PullRequest, pr_id)
     if not pr:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pull request not found")
     out = PullRequestOut.model_validate(pr)
-    repo = await db.get(Repository, pr.repository_id)
+    repo = db.get(Repository, pr.repository_id)
     out.repository_full_name = repo.full_name if repo else None
     return out
+
+
+@router.post("/{pr_id}/review")
+def trigger_review(pr_id: uuid.UUID, force: bool = False, db: Session = Depends(get_sync_db)) -> dict:
+    pr = db.get(PullRequest, pr_id)
+    if not pr:
+        raise HTTPException(status_code=404, detail="Pull request not found")
+    from app.models.review import ReviewJob
+    from app.workers.tasks import review_pull_request
+
+    existing = db.execute(
+        select(ReviewJob).where(
+            ReviewJob.pull_request_id == pr.id,
+            ReviewJob.commit_sha == pr.head_sha,
+        )
+    ).scalar_one_or_none()
+    if existing and existing.status in {"queued", "analyzing", "detecting", "verifying", "publishing", "completed"} and not force:
+        return {"status": "exists", "review_job_id": str(existing.id), "job_status": existing.status}
+    if force and existing and existing.status in {"completed", "failed"}:
+        db.delete(existing)
+        db.flush()
+
+    job = ReviewJob(
+        pull_request_id=pr.id,
+        commit_sha=pr.head_sha,
+        trigger="manual",
+        status="queued",
+    )
+    db.add(job)
+    pr.review_status = "queued"
+    db.flush()
+    task = review_pull_request.delay(str(pr.id), pr.head_sha)
+    job.celery_task_id = task.id
+    return {"status": "queued", "review_job_id": str(job.id), "task_id": task.id}

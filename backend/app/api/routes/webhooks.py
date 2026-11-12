@@ -47,6 +47,11 @@ def _process_in_background(
     delivery_id: str,
     payload: dict,
 ) -> None:
+    # Ping only validates connectivity — acknowledge with no DB work.
+    if event_type == "ping":
+        logger.info("webhook_ping_ok", delivery_id=delivery_id)
+        return
+
     SessionLocal = get_sync_session_factory()
     assert SessionLocal is not None
     with SessionLocal() as db:
@@ -56,7 +61,11 @@ def _process_in_background(
             _enqueue_from_result(result)
         except Exception:
             db.rollback()
-            raise
+            logger.exception(
+                "webhook_background_failed",
+                delivery_id=delivery_id,
+                github_event=event_type,
+            )
 
 
 @router.post("/github", response_model=WebhookAck)
@@ -96,7 +105,7 @@ async def github_webhook(
 
     logger.info(
         "webhook_received",
-        event=event_type,
+        github_event=event_type,
         action=action,
         delivery_id=delivery_id,
     )

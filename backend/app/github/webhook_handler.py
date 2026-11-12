@@ -419,8 +419,10 @@ def process_webhook(
                 result = {"status": "ok", "repositories_synced": n}
             else:
                 result = {"status": "error", "reason": "installation_not_found"}
+        elif event_type == "ping":
+            result = {"status": "ok", "action": "ping"}
         else:
-            result = {"status": "ignored", "event": event_type}
+            result = {"status": "ignored", "github_event": event_type}
 
         event.status = "processed"
         event.processed_at = datetime.now(timezone.utc)

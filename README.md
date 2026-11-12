@@ -16,20 +16,21 @@ Internal AI-powered GitHub code review platform. Context-aware PR reviews via Ge
 
 ## Phase status
 
-- [x] **Phase 1 — Foundation** (this release): Docker Compose, database schema, FastAPI, dashboard shell, config/BYOK settings API
-- [ ] Phase 2 — GitHub App, webhooks, PR/diff fetching
-- [ ] Phase 3 — Repository indexing & retrieval
-- [ ] Phase 4 — Multi-stage LangGraph review engine
-- [ ] Phase 5 — Sandbox verification & GitHub comment publishing
-- [ ] Phase 6 — Analytics, budgets, admin polish
-- [ ] Phase 7 — Integration tests, hardening, docs
+- [x] **Phase 1 — Foundation**: Docker Compose, schema, FastAPI, dashboard shell, config
+- [x] **Phase 2 — GitHub**: App JWT/installation tokens, webhooks (idempotent), repo sync, PR/diff fetch, `/review` commands, review publisher
+- [x] **Phase 3 — Intelligence**: clone/fetch, Tree-sitter symbols, chunking, Gemini embeddings, pgvector retrieval, incremental index
+- [x] **Phase 4 — AI review**: LangGraph stages — analyze → retrieve → bug/security/test → verify → decide
+- [x] **Phase 5 — Verify & publish**: static analysis, isolated Docker sandbox, inline GitHub comments
+- [x] **Phase 6 — Admin**: BYOK with live key validation, usage/cost charts, budgets, repo actions
+- [x] **Phase 7 — Quality**: unit tests, sample buggy repo, sandbox Dockerfile, docs
 
 ## Quick start
 
 ### Prerequisites
 
 - Docker & Docker Compose
-- (Optional for local Python) Python 3.12+, Node 22+
+- GitHub App credentials (for live PR reviews)
+- Gemini API key (BYOK)
 
 ### 1. Configure environment
 
@@ -37,13 +38,12 @@ Internal AI-powered GitHub code review platform. Context-aware PR reviews via Ge
 cp .env.example .env
 ```
 
-Edit `.env` and set at least:
+Set at least:
 
-- `SECRET_KEY` / `ENCRYPTION_KEY` — long random strings
-- `GEMINI_API_KEY` — optional for Phase 1; required once reviews run
-- `GITHUB_APP_*` — required from Phase 2 onward
-
-Place the GitHub App private key at `secrets/github-app.pem` when ready (Phase 2).
+- `SECRET_KEY` / `ENCRYPTION_KEY`
+- `GEMINI_API_KEY` (or configure in Settings UI)
+- `GITHUB_APP_ID`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_NAME`
+- Place private key at `secrets/github-app.pem`
 
 ### 2. Start the stack
 
@@ -51,94 +51,64 @@ Place the GitHub App private key at `secrets/github-app.pem` when ready (Phase 2
 docker compose up --build
 ```
 
-Services:
-
 | Service | URL |
 |---------|-----|
 | Dashboard | http://localhost:3000 |
-| API / docs | http://localhost:8000/docs |
+| API docs | http://localhost:8000/docs |
 | Health | http://localhost:8000/api/health |
-| Postgres | localhost:5432 |
-| Redis | localhost:6379 |
 
-Migrations run automatically on backend startup (`alembic upgrade head`).
-
-### 3. Local backend tests (no Docker DB required for unit tests)
+Optional sandbox image:
 
 ```bash
-cd backend
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-source .venv/bin/activate
-pip install -r requirements.txt
-pytest tests/test_health.py -q
+docker build -t spider-sandbox:latest -f backend/Dockerfile.sandbox backend
 ```
 
-### 4. Local frontend
+### 3. Install the GitHub App
+
+1. Create a GitHub App with permissions: Contents (read), Pull requests (read/write), Metadata (read)
+2. Subscribe to `pull_request`, `installation`, `installation_repositories`, `issue_comment`
+3. Webhook URL: `https://<host>/api/webhooks/github`
+4. Install on your org; open **Repositories** in the dashboard and **Sync**
+5. Trigger indexing with **Re-index**
+
+### 4. Review flow
+
+- Opening/updating a PR enqueues an async review (deduped per commit SHA)
+- Comment `/review` or `/review-again` on a PR to trigger manually
+- Verified findings are posted as inline review comments; clean PRs get a summary with no invented issues
+
+## Manual review trigger (API)
 
 ```bash
-cd frontend
-npm install
-npm run dev
+curl -X POST http://localhost:8000/api/pull-requests/<pr-uuid>/review
 ```
 
-Point `NEXT_PUBLIC_API_URL` at the running API (default `http://localhost:8000`).
+## Tests
 
-## GitHub App setup (Phase 2)
+```bash
+docker compose exec backend pytest -q
+```
 
-1. Create a GitHub App in your organization settings.
-2. Permissions (minimum):
-   - Repository contents: Read
-   - Pull requests: Read & Write
-   - Commit statuses: Read & Write
-   - Metadata: Read
-3. Subscribe to:
-   - `pull_request` (opened, synchronize, reopened, closed)
-   - `installation` (created, deleted)
-   - `issue_comment` (for `/review` and `/review-again`)
-4. Webhook URL: `https://<your-host>/api/webhooks/github`
-5. Set webhook secret → `GITHUB_APP_WEBHOOK_SECRET`
-6. Download private key → `secrets/github-app.pem`
-7. Set `GITHUB_APP_ID`, client ID/secret in `.env`
+Sample intentional-bug repo: `samples/buggy_repo/` (SQL injection, hardcoded secret, missing funds check, division by zero, path traversal).
 
-## Gemini BYOK
+## Security notes
 
-Configure via **Settings** in the dashboard, or set `GEMINI_API_KEY` in `.env` for development.
-
-- Keys are encrypted at rest (Fernet)
-- API responses only return masked keys
-- Primary and embedding model names are stored in `model_configurations` and read by agents (never hardcoded in review code)
-
-Default models (overridable):
-
-- Chat / review: `gemini-2.0-flash`
-- Embeddings: `text-embedding-004`
+- API keys encrypted at rest; responses only return masked values
+- Installation tokens and PEM keys never sent to the frontend
+- Webhook HMAC verification required in production
+- Sandbox runs read-only, non-root, no network, with CPU/memory/PID limits
+- Monthly Gemini budget enforced before review tasks run
 
 ## Project layout
 
 ```
-backend/
-  app/
-    api/routes/     # HTTP endpoints
-    core/           # config, security, encryption, logging
-    database/       # engines & sessions
-    models/         # SQLAlchemy models
-    workers/        # Celery
-    github/         # Phase 2
-    indexing/       # Phase 3
-    agents/         # Phase 4
-    verification/   # Phase 5
-    services/       # orchestration helpers
-  alembic/          # migrations
-frontend/
-  app/              # Next.js pages
-  components/       # UI
-  lib/              # API client, utils
+backend/app/
+  github/       # App auth, webhooks, PR, publisher
+  indexing/     # clone, parse, embed, retrieve
+  agents/       # LangGraph multi-stage review
+  verification/ # sandbox + static analysis
+  services/     # review, cost, analytics, gemini
+  api/routes/   # HTTP API
+frontend/app/   # Dashboard pages
+samples/        # Fixtures for pipeline validation
 ```
-
-## Security notes
-
-- Never commit `.env`, PEM keys, or API keys
-- Webhook signatures verified with HMAC-SHA256
-- Admin/API secrets stay server-side
-- PR code execution (Phase 5) runs only in isolated containers with resource limits and no access to app secrets

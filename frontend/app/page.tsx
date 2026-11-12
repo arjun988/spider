@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import {
   AlertTriangle,
   Clock,
@@ -103,9 +104,9 @@ export default function OverviewPage() {
                 m?.recent_reviews.map((r) => (
                   <tr key={r.id}>
                     <td>
-                      <div className="font-medium">
-                        {r.pr_number != null ? `#${r.pr_number}` : "—"}
-                      </div>
+                      <Link href={`/reviews/${r.id}`} className="font-medium text-accent hover:underline">
+                        {r.pr_number != null ? `#${r.pr_number}` : "review"}
+                      </Link>
                       <div className="max-w-xs truncate text-xs text-muted-foreground">
                         {r.pr_title || "Untitled"}
                       </div>

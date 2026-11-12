@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     # Gemini (centralized — never hardcode model names elsewhere)
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
-    gemini_embedding_model: str = "text-embedding-004"
+    gemini_embedding_model: str = "gemini-embedding-001"
     gemini_temperature: float = 0.1
     gemini_max_output_tokens: int = 8192
     gemini_embedding_dimensions: int = 768

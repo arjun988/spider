@@ -20,9 +20,11 @@ logger = get_logger(__name__)
 PRICE_TABLE = {
     "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
     "gemini-2.0-flash-lite": {"input": 0.075, "output": 0.30},
+    "gemini-2.5-flash": {"input": 0.15, "output": 0.60},
     "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
     "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
     "text-embedding-004": {"input": 0.025, "output": 0.0},
+    "gemini-embedding-001": {"input": 0.15, "output": 0.0},
 }
 
 
@@ -169,19 +171,26 @@ def embed_texts(
     # Batch in small groups
     batch_size = 16
     total_tokens = 0
+    dim = settings.gemini_embedding_dimensions
     for i in range(0, len(texts), batch_size):
         batch = texts[i : i + batch_size]
         started = time.time()
-        result = client.models.embed_content(
-            model=cfg.embedding_model,
-            contents=batch,
-        )
+        embed_kwargs: dict[str, Any] = {
+            "model": cfg.embedding_model,
+            "contents": batch,
+        }
+        # Newer Gemini embedding models default to 3072-d; request DB width explicitly.
+        try:
+            from google.genai import types
+
+            embed_kwargs["config"] = types.EmbedContentConfig(output_dimensionality=dim)
+        except Exception:
+            pass
+        result = client.models.embed_content(**embed_kwargs)
         latency_ms = int((time.time() - started) * 1000)
         embeddings = getattr(result, "embeddings", None) or []
         for emb in embeddings:
             values = list(getattr(emb, "values", []) or [])
-            # Pad/truncate to configured dimensions
-            dim = settings.gemini_embedding_dimensions
             if len(values) < dim:
                 values = values + [0.0] * (dim - len(values))
             elif len(values) > dim:

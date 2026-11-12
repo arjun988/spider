@@ -41,7 +41,7 @@ class ModelConfiguration(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     embedding_model: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
-        default="text-embedding-004",
+        default="gemini-embedding-001",
     )
     temperature: Mapped[float] = mapped_column(Float, default=0.1, nullable=False)
     max_output_tokens: Mapped[int] = mapped_column(Integer, default=8192, nullable=False)

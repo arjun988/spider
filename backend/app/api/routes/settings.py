@@ -144,10 +144,14 @@ def update_gemini_config(body: GeminiConfigUpdate, db: Session = Depends(get_syn
                 try:
                     from app.services.gemini_client import validate_api_key
 
-                    model = body.primary_model or config.primary_model
-                    ok = validate_api_key(key, model)
+                    model = body.primary_model or config.primary_model or app_settings.gemini_model
+                    ok, detail = validate_api_key(key, model)
                     if not ok:
-                        raise HTTPException(status_code=400, detail="Gemini API key validation failed")
+                        config.connection_status = "invalid"
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Gemini API key validation failed ({model}): {detail}",
+                        )
                     config.api_key_validated = True
                     config.connection_status = "connected"
                 except HTTPException:
@@ -196,11 +200,14 @@ def validate_gemini(db: Session = Depends(get_sync_db)) -> dict:
     from app.services.gemini_client import validate_api_key
 
     try:
-        ok = validate_api_key(decrypt_value(config.encrypted_api_key), config.primary_model)
+        ok, detail = validate_api_key(
+            decrypt_value(config.encrypted_api_key),
+            config.primary_model or app_settings.gemini_model,
+        )
         config.api_key_validated = ok
         config.connection_status = "connected" if ok else "invalid"
         db.flush()
-        return {"valid": ok, "connection_status": config.connection_status}
+        return {"valid": ok, "connection_status": config.connection_status, "detail": detail}
     except Exception as exc:
         config.connection_status = "error"
         db.flush()

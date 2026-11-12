@@ -208,13 +208,42 @@ def embed_texts(
     return vectors
 
 
-def validate_api_key(api_key: str, model: str | None = None) -> bool:
+def _response_text(response: Any) -> str:
+    text = getattr(response, "text", None)
+    if text:
+        return str(text)
+    # Fallback for models that put output in candidate parts
+    for cand in getattr(response, "candidates", None) or []:
+        content = getattr(cand, "content", None)
+        for part in getattr(content, "parts", None) or []:
+            part_text = getattr(part, "text", None)
+            if part_text:
+                return str(part_text)
+    return ""
+
+
+def validate_api_key(api_key: str, model: str | None = None) -> tuple[bool, str]:
+    """
+    Validate a Gemini API key with a tiny live request.
+    Returns (ok, detail). Uses a higher token budget because some Gemini
+    models spend tokens on internal reasoning before visible output.
+    """
     client = _client(api_key)
     model_name = model or settings.gemini_model
-    response = client.models.generate_content(
-        model=model_name,
-        contents="Reply with the JSON object {\"ok\": true}",
-        config={"temperature": 0, "max_output_tokens": 32, "response_mime_type": "application/json"},
-    )
-    text = getattr(response, "text", "") or ""
-    return "ok" in text.lower()
+    try:
+        response = client.models.generate_content(
+            model=model_name,
+            contents='Reply with JSON only: {"ok": true}',
+            config={
+                "temperature": 0,
+                "max_output_tokens": 256,
+                "response_mime_type": "application/json",
+            },
+        )
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+
+    text = _response_text(response)
+    if "ok" in text.lower():
+        return True, "connected"
+    return False, f"Unexpected model response for {model_name}: {text[:200]!r}"

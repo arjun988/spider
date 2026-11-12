@@ -37,7 +37,7 @@ class ModelConfiguration(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         default="not_configured",
     )  # not_configured | connected | invalid | rate_limited | error
 
-    primary_model: Mapped[str] = mapped_column(String(255), nullable=False, default="gemini-2.0-flash")
+    primary_model: Mapped[str] = mapped_column(String(255), nullable=False, default="gemini-2.5-flash")
     embedding_model: Mapped[str] = mapped_column(
         String(255),
         nullable=False,

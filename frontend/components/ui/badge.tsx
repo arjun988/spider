@@ -2,12 +2,12 @@ import { cn } from "@/lib/utils";
 import type { HTMLAttributes } from "react";
 
 const variants: Record<string, string> = {
-  default: "bg-secondary text-secondary-foreground",
-  success: "bg-success/15 text-success border-success/30",
-  warning: "bg-warning/15 text-warning border-warning/30",
-  destructive: "bg-destructive/15 text-destructive border-destructive/30",
-  muted: "bg-muted text-muted-foreground",
-  accent: "bg-accent/15 text-accent border-accent/30",
+  default: "border-border bg-secondary text-secondary-foreground",
+  success: "border-success/20 bg-success/10 text-success",
+  warning: "border-warning/25 bg-warning/10 text-warning",
+  destructive: "border-destructive/20 bg-destructive/10 text-destructive",
+  muted: "border-border bg-muted text-muted-foreground",
+  accent: "border-primary/20 bg-primary/10 text-primary",
 };
 
 export function Badge({
@@ -18,7 +18,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded border px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide",
+        "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.08em]",
         variants[variant],
         className,
       )}

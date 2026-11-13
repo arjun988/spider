@@ -186,7 +186,24 @@ def embed_texts(
             embed_kwargs["config"] = types.EmbedContentConfig(output_dimensionality=dim)
         except Exception:
             pass
-        result = client.models.embed_content(**embed_kwargs)
+        result = None
+        last_exc: Exception | None = None
+        for attempt in range(4):
+            try:
+                result = client.models.embed_content(**embed_kwargs)
+                break
+            except Exception as exc:
+                last_exc = exc
+                msg = str(exc).lower()
+                if "429" in msg or "resource_exhausted" in msg or "quota" in msg:
+                    delay = min(60, 5 * (2**attempt))
+                    logger.warning("embed_rate_limited", attempt=attempt + 1, delay=delay)
+                    time.sleep(delay)
+                    continue
+                raise
+        if result is None:
+            assert last_exc is not None
+            raise last_exc
         latency_ms = int((time.time() - started) * 1000)
         embeddings = getattr(result, "embeddings", None) or []
         for emb in embeddings:

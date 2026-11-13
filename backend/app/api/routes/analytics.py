@@ -60,7 +60,6 @@ def get_overview(db: Session = Depends(get_sync_db)) -> OverviewResponse:
 
     recent_jobs = db.execute(
         select(ReviewJob)
-        .where(ReviewJob.status.in_(["completed", "failed"]))
         .order_by(ReviewJob.created_at.desc())
         .limit(10)
     ).scalars().all()

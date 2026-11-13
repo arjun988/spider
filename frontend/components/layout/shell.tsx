@@ -6,26 +6,41 @@ export function Shell({
   title,
   description,
   actions,
+  breadcrumb,
 }: {
   children: ReactNode;
   title: string;
   description?: string;
   actions?: ReactNode;
+  breadcrumb?: string;
 }) {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center justify-between border-b border-border px-6">
-          <div>
-            <h1 className="text-sm font-semibold text-foreground">{title}</h1>
-            {description ? (
-              <p className="text-xs text-muted-foreground">{description}</p>
+        <header className="sticky top-0 z-20 border-b border-border/80 bg-background/80 px-6 py-4 backdrop-blur-md">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 space-y-1">
+              {breadcrumb ? <p className="eyebrow">{breadcrumb}</p> : null}
+              <h1 className="text-[1.35rem] font-semibold tracking-tight text-foreground">
+                {title}
+              </h1>
+              {description ? (
+                <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                  {description}
+                </p>
+              ) : null}
+            </div>
+            {actions ? (
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 pt-0.5">
+                {actions}
+              </div>
             ) : null}
           </div>
-          {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
         </header>
-        <main className="flex-1 overflow-auto p-6">{children}</main>
+        <main className="mx-auto w-full max-w-[1400px] flex-1 space-y-5 overflow-auto p-6">
+          {children}
+        </main>
       </div>
     </div>
   );

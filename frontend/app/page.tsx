@@ -30,6 +30,7 @@ export default function OverviewPage() {
     <Shell
       title="Overview"
       description="Live metrics from review jobs, findings, and API usage"
+      breadcrumb="Workspace / Dashboard"
     >
       {error ? (
         <Card className="border-destructive/40">
@@ -40,7 +41,7 @@ export default function OverviewPage() {
         </Card>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         <StatCard
           label="Repositories"
           value={isLoading ? "…" : (m?.total_repositories ?? 0)}
@@ -63,6 +64,12 @@ export default function OverviewPage() {
           icon={ShieldAlert}
         />
         <StatCard
+          label="High"
+          value={isLoading ? "…" : (m?.high_findings ?? 0)}
+          tone="danger"
+          icon={AlertTriangle}
+        />
+        <StatCard
           label="Avg review time"
           value={isLoading ? "…" : formatDuration(m?.average_review_time_ms)}
           icon={Clock}
@@ -75,9 +82,10 @@ export default function OverviewPage() {
         />
       </div>
 
-      <Card className="mt-4">
+      <Card>
         <CardHeader>
           <CardTitle>Recent reviews</CardTitle>
+          <p className="text-xs text-muted-foreground">Latest completed and in-flight review jobs</p>
         </CardHeader>
         <CardContent className="p-0">
           <table className="data-table">
@@ -97,14 +105,14 @@ export default function OverviewPage() {
                   <td colSpan={6} className="!text-muted-foreground">
                     {isLoading
                       ? "Loading…"
-                      : "No reviews yet. Connect a GitHub App and open a PR to begin."}
+                      : "No reviews yet. Install the GitHub App, sync a repo, then open a PR."}
                   </td>
                 </tr>
               ) : (
                 m?.recent_reviews.map((r) => (
                   <tr key={r.id}>
                     <td>
-                      <Link href={`/reviews/${r.id}`} className="font-medium text-accent hover:underline">
+                      <Link href={`/reviews/${r.id}`} className="font-medium text-primary hover:underline">
                         {r.pr_number != null ? `#${r.pr_number}` : "review"}
                       </Link>
                       <div className="max-w-xs truncate text-xs text-muted-foreground">

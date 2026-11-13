@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.routes.github import get_sync_db
+from app.core.security import require_admin_token
 from app.models.repository import Repository
 
 router = APIRouter(prefix="/repositories", tags=["repositories"])
@@ -56,7 +57,12 @@ def get_repository(repository_id: uuid.UUID, db: Session = Depends(get_sync_db))
 
 
 @router.post("/{repository_id}/reindex")
-def reindex_repository(repository_id: uuid.UUID, full: bool = True, db: Session = Depends(get_sync_db)) -> dict:
+def reindex_repository(
+    repository_id: uuid.UUID,
+    full: bool = True,
+    db: Session = Depends(get_sync_db),
+    _: None = Depends(require_admin_token),
+) -> dict:
     repo = db.get(Repository, repository_id)
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
@@ -69,7 +75,12 @@ def reindex_repository(repository_id: uuid.UUID, full: bool = True, db: Session 
 
 
 @router.post("/{repository_id}/auto-review")
-def set_auto_review(repository_id: uuid.UUID, enabled: bool = True, db: Session = Depends(get_sync_db)) -> dict:
+def set_auto_review(
+    repository_id: uuid.UUID,
+    enabled: bool = True,
+    db: Session = Depends(get_sync_db),
+    _: None = Depends(require_admin_token),
+) -> dict:
     repo = db.get(Repository, repository_id)
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")

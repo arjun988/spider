@@ -30,6 +30,7 @@ export default function RepositoriesPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["repositories"],
     queryFn: api.repositories,
+    refetchInterval: 20_000,
   });
   const github = useQuery({
     queryKey: ["github-status"],
@@ -76,7 +77,11 @@ export default function RepositoriesPage() {
   });
 
   return (
-    <Shell title="Repositories" description="Connected repositories and indexing status">
+    <Shell
+      title="Repositories"
+      description="Connected repositories and indexing status"
+      breadcrumb="Workspace / Repositories"
+    >
       <Card className="mb-4">
         <CardHeader>
           <CardTitle>GitHub App</CardTitle>
@@ -86,7 +91,7 @@ export default function RepositoriesPage() {
             {github.data?.configured ? "configured" : "not configured"}
           </Badge>
           {github.data?.install_url ? (
-            <a className="text-accent underline" href={github.data.install_url} target="_blank" rel="noreferrer">
+            <a className="text-primary underline" href={github.data.install_url} target="_blank" rel="noreferrer">
               Install on organization
             </a>
           ) : (
@@ -145,7 +150,20 @@ export default function RepositoriesPage() {
                   data?.items.map((repo) => (
                     <tr key={repo.id}>
                       <td>
-                        <div className="font-medium">{repo.full_name}</div>
+                        <div className="font-medium">
+                          {repo.html_url ? (
+                            <a
+                              href={repo.html_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-primary hover:underline"
+                            >
+                              {repo.full_name}
+                            </a>
+                          ) : (
+                            repo.full_name
+                          )}
+                        </div>
                       </td>
                       <td>{repo.primary_language || "—"}</td>
                       <td>

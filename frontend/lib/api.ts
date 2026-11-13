@@ -83,6 +83,7 @@ export interface PullRequest {
   last_reviewed_at: string | null;
   repository_id: string;
   repository_full_name: string | null;
+  latest_review_job_id: string | null;
   created_at: string;
 }
 
@@ -101,6 +102,11 @@ export interface GeminiConfig {
   max_files_per_review: number;
   context_retrieval_limit: number;
   monthly_budget_usd: number;
+  budget?: {
+    monthly_budget_usd?: number;
+    spent_usd?: number;
+    remaining_usd?: number;
+  } | null;
 }
 
 export interface SystemStatus {
@@ -139,4 +145,70 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  triggerReview: (prId: string, force = false) =>
+    request<{ status: string; review_job_id: string; task_id?: string; job_status?: string }>(
+      `/api/pull-requests/${prId}/review?force=${force ? "true" : "false"}`,
+      { method: "POST" },
+    ),
+  getReview: (id: string) => request<ReviewDetail>(`/api/reviews/${id}`),
+  submitFeedback: (
+    findingId: string,
+    body: { feedback_type: "helpful" | "false_positive" | "dismissed" | "fixed"; comment?: string },
+  ) =>
+    request(`/api/reviews/findings/${findingId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  usage: (days = 30) =>
+    request<{
+      timeseries: Array<{ date: string; cost_usd: number }>;
+      models: Array<{ model: string; cost_usd: number; tokens: number }>;
+      reviews: Array<{ date: string; count: number }>;
+      by_repository: Array<{ repository: string; cost_usd: number; reviews: number }>;
+    }>(`/api/analytics/usage?days=${days}`),
 };
+
+export interface ReviewFinding {
+  id: string;
+  finding_key: string;
+  file_path: string;
+  start_line: number;
+  end_line: number;
+  category: string;
+  severity: string;
+  confidence: number;
+  title: string;
+  explanation: string;
+  failure_scenario: string;
+  suggested_fix: string | null;
+  verification_status: string;
+  published: boolean;
+  rejected_reason: string | null;
+}
+
+export interface ReviewDetail {
+  id: string;
+  pull_request_id: string;
+  commit_sha: string;
+  trigger: string;
+  status: string;
+  summary: string | null;
+  findings_count: number;
+  published_count: number;
+  rejected_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  estimated_cost_usd: number;
+  model_name: string | null;
+  duration_ms: number | null;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  change_summary: Record<string, unknown> | null;
+  timeline: Array<Record<string, unknown>> | null;
+  findings: ReviewFinding[];
+  pr_number: number | null;
+  pr_title: string | null;
+  pr_html_url: string | null;
+  repository_full_name: string | null;
+}

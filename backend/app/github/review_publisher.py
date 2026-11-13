@@ -93,10 +93,11 @@ def compute_diff_side_line(patch: str | None, target_line: int) -> int | None:
     """
     Map a file line number to a RIGHT-side diff line suitable for GitHub
     multi-line review comments (line + side=RIGHT).
-    Returns the line number if it appears as an added/context line in the patch.
+    Returns the line number only if it appears as an added/context line in the patch.
+    Without a patch, skip inline comments (summary-only) to avoid failing the whole review.
     """
     if not patch:
-        return target_line
+        return None
 
     new_line = 0
     for raw in patch.splitlines():
@@ -116,8 +117,7 @@ def compute_diff_side_line(patch: str | None, target_line: int) -> int | None:
         new_line += 1
         if new_line == target_line:
             return target_line
-    # Fallback: still attempt the line (GitHub may accept for unbroken files)
-    return target_line
+    return None
 
 
 def publish_review(
@@ -140,6 +140,8 @@ def publish_review(
     ]
 
     comments: list[dict[str, Any]] = []
+    published_keys: list[str] = []
+    skipped_keys: list[str] = []
     for finding in publishable:
         path = finding["file_path"]
         line = int(finding.get("end_line") or finding["start_line"])
@@ -147,6 +149,9 @@ def publish_review(
         mapped = compute_diff_side_line(patch, line)
         if mapped is None:
             logger.warning("skip_comment_outdated_line", path=path, line=line)
+            key = finding.get("finding_key")
+            if key:
+                skipped_keys.append(key)
             continue
         comments.append(
             {
@@ -154,50 +159,83 @@ def publish_review(
                 "line": mapped,
                 "side": "RIGHT",
                 "body": format_finding_comment(finding),
+                "finding_key": finding.get("finding_key"),
             }
         )
+        if finding.get("finding_key"):
+            published_keys.append(finding["finding_key"])
 
     event = "COMMENT"
     body = build_review_summary(publishable, change_summary)
 
-    # GitHub limits comments per review; batch if needed
+    # Prefer summary-only when no valid inline anchors — never fail the whole review.
     max_per_review = 30
-    first_batch = comments[:max_per_review]
-    result = client.create_pull_request_review(
-        owner=owner,
-        repo=repo,
-        number=pr_number,
-        body=body,
-        event=event,
-        comments=first_batch or None,
-        commit_id=commit_sha,
-    )
+    first_batch = [
+        {k: v for k, v in c.items() if k != "finding_key"}
+        for c in comments[:max_per_review]
+    ]
+    try:
+        result = client.create_pull_request_review(
+            owner=owner,
+            repo=repo,
+            number=pr_number,
+            body=body,
+            event=event,
+            comments=first_batch or None,
+            commit_id=commit_sha,
+        )
+    except Exception as exc:
+        # Retry once as summary-only if inline comments are rejected by GitHub.
+        logger.warning("inline_review_failed_retry_summary", error=str(exc))
+        result = client.create_pull_request_review(
+            owner=owner,
+            repo=repo,
+            number=pr_number,
+            body=body,
+            event=event,
+            comments=None,
+            commit_id=commit_sha,
+        )
+        published_keys = []
+        skipped_keys = [f.get("finding_key") for f in publishable if f.get("finding_key")]
 
     extra_ids = []
     remaining = comments[max_per_review:]
     while remaining:
-        batch = remaining[:max_per_review]
+        batch_raw = remaining[:max_per_review]
         remaining = remaining[max_per_review:]
-        extra = client.create_pull_request_review(
-            owner=owner,
-            repo=repo,
-            number=pr_number,
-            body="Additional Spider findings.",
-            event="COMMENT",
-            comments=batch,
-            commit_id=commit_sha,
-        )
-        extra_ids.append(extra.get("id"))
+        batch = [{k: v for k, v in c.items() if k != "finding_key"} for c in batch_raw]
+        try:
+            extra = client.create_pull_request_review(
+                owner=owner,
+                repo=repo,
+                number=pr_number,
+                body="Additional Spider findings.",
+                event="COMMENT",
+                comments=batch,
+                commit_id=commit_sha,
+            )
+            extra_ids.append(extra.get("id"))
+        except Exception as exc:
+            logger.warning("extra_review_batch_failed", error=str(exc), count=len(batch))
+            for c in batch_raw:
+                key = c.get("finding_key")
+                if key and key in published_keys:
+                    published_keys.remove(key)
+                    skipped_keys.append(key)
 
     logger.info(
         "review_published",
         pr=pr_number,
-        comments=len(comments),
+        comments=len(published_keys),
+        skipped=len(skipped_keys),
         review_id=result.get("id"),
     )
     return {
         "review_id": result.get("id"),
         "html_url": result.get("html_url"),
-        "published_comments": len(comments),
+        "published_comments": len(published_keys),
+        "published_finding_keys": published_keys,
+        "skipped_finding_keys": skipped_keys,
         "extra_review_ids": extra_ids,
     }

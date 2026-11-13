@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.security import require_admin_token
 from app.database.session import get_sync_session_factory
 from app.github.webhook_handler import sync_installation_repositories, upsert_repository
 from app.models.github import GitHubInstallation
@@ -70,7 +71,11 @@ def github_status(db: Session = Depends(get_sync_db)) -> GitHubStatusOut:
 
 
 @router.post("/installations/{installation_id}/sync-repos")
-def sync_repos(installation_id: int, db: Session = Depends(get_sync_db)) -> dict:
+def sync_repos(
+    installation_id: int,
+    db: Session = Depends(get_sync_db),
+    _: None = Depends(require_admin_token),
+) -> dict:
     row = db.execute(
         select(GitHubInstallation).where(
             GitHubInstallation.installation_id == installation_id,

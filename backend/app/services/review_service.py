@@ -5,12 +5,14 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session, selectinload
 
+from app.agents.decision_agent import prioritize_findings
 from app.agents.graph import run_review_pipeline
 from app.agents.schemas import FindingDraft
 from app.core.logging import get_logger
+from app.models.settings import ModelConfiguration
 from app.github.client import GitHubClient
 from app.github.pull_request_service import fetch_pr_diff_bundle
 from app.github.review_publisher import publish_review
@@ -31,6 +33,51 @@ def _sum_usage(usage: list[dict]) -> tuple[int, int, float]:
     return inp, out, cost
 
 
+def mark_review_failed(
+    db: Session,
+    pull_request_id: str,
+    commit_sha: str,
+    error_message: str,
+) -> None:
+    """Persist a failed status after the worker rolls back a broken transaction."""
+    pr = db.get(PullRequest, uuid.UUID(str(pull_request_id)))
+    if not pr:
+        return
+    job = db.execute(
+        select(ReviewJob).where(
+            ReviewJob.pull_request_id == pr.id,
+            ReviewJob.commit_sha == commit_sha,
+        )
+    ).scalar_one_or_none()
+    if job and job.status != "completed":
+        job.status = "failed"
+        job.error_message = (error_message or "unknown error")[:4000]
+        job.completed_at = datetime.now(timezone.utc)
+    if pr.review_status not in {"completed"}:
+        pr.review_status = "failed"
+    db.flush()
+
+
+def _clear_job_findings(db: Session, job: ReviewJob) -> None:
+    """Remove partial findings from a previous failed attempt before re-running."""
+    finding_ids = [
+        row.id
+        for row in db.execute(
+            select(ReviewFinding).where(ReviewFinding.review_job_id == job.id)
+        ).scalars().all()
+    ]
+    if finding_ids:
+        db.execute(delete(VerificationResult).where(VerificationResult.finding_id.in_(finding_ids)))
+        db.execute(delete(ReviewFinding).where(ReviewFinding.id.in_(finding_ids)))
+    job.findings_count = 0
+    job.published_count = 0
+    job.rejected_count = 0
+    job.error_message = None
+    job.summary = None
+    job.timeline = None
+    db.flush()
+
+
 def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
     pr = db.get(PullRequest, uuid.UUID(str(pull_request_id)))
     if not pr:
@@ -40,10 +87,12 @@ def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
         raise ValueError("Repository not found")
 
     job = db.execute(
-        select(ReviewJob).where(
+        select(ReviewJob)
+        .where(
             ReviewJob.pull_request_id == pr.id,
             ReviewJob.commit_sha == commit_sha,
         )
+        .options(selectinload(ReviewJob.findings))
     ).scalar_one_or_none()
     if not job:
         job = ReviewJob(
@@ -58,9 +107,33 @@ def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
     if job.status == "completed":
         return {"status": "already_completed", "review_job_id": str(job.id)}
 
+    # If a prior attempt already published to GitHub but crashed before marking
+    # completed, don't spam a second review — just finalize local state.
+    if job.github_review_id and job.published_count:
+        finished = datetime.now(timezone.utc)
+        job.status = "completed"
+        job.completed_at = finished
+        job.error_message = None
+        pr.review_status = "completed"
+        pr.findings_count = job.published_count or job.findings_count
+        pr.last_reviewed_at = finished
+        pr.last_reviewed_sha = commit_sha
+        db.flush()
+        return {
+            "status": "completed",
+            "review_job_id": str(job.id),
+            "published": job.published_count,
+            "findings": job.findings_count,
+            "recovered": True,
+        }
+
+    if job.findings:
+        _clear_job_findings(db, job)
+
     started = datetime.now(timezone.utc)
     job.status = "analyzing"
     job.started_at = started
+    job.error_message = None
     pr.review_status = "reviewing"
     db.flush()
 
@@ -123,11 +196,20 @@ def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
             review_job_id=job.id,
         )
 
-        # Merge static findings (already confirmed)
-        for draft in static_drafts:
-            decision.findings.append(draft)
-            if draft.should_publish:
-                decision.published_count += 1
+        # Merge static findings then re-apply publish thresholds
+        if static_drafts:
+            decision.findings.extend(static_drafts)
+            cfg = db.execute(
+                select(ModelConfiguration).where(
+                    ModelConfiguration.organization_id == repo.organization_id
+                )
+            ).scalar_one_or_none()
+            decision = prioritize_findings(
+                decision.findings,
+                decision.summary.split("\n\n")[0] if decision.summary else (pr.title or ""),
+                severity_threshold=cfg.severity_threshold if cfg else None,
+                confidence_threshold=cfg.confidence_threshold if cfg else None,
+            )
 
         # Optional sandbox checks — annotate only, do not claim reproduction unless success
         job.status = "verifying"
@@ -211,12 +293,18 @@ def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
         )
         job.github_review_id = pub.get("review_id")
         job.published_count = pub.get("published_comments") or 0
+        # Commit publish marker immediately so Celery retries cannot double-post.
+        db.flush()
+        db.commit()
+        db.refresh(job)
+        db.refresh(pr)
+        db.refresh(repo)
 
-        # Mark published findings
+        # Mark only findings that were actually posted inline
         rows = db.execute(
             select(ReviewFinding).where(ReviewFinding.review_job_id == job.id)
         ).scalars().all()
-        publish_keys = {f["finding_key"] for f in publishable}
+        publish_keys = set(pub.get("published_finding_keys") or [])
         for row in rows:
             if row.finding_key in publish_keys:
                 row.published = True
@@ -225,13 +313,15 @@ def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
         job.status = "completed"
         job.completed_at = finished
         job.duration_ms = int((finished - started).total_seconds() * 1000)
+        first_completion = pr.review_status != "completed"
         pr.review_status = "completed"
         pr.findings_count = job.published_count
         pr.last_reviewed_at = finished
         pr.last_reviewed_sha = commit_sha
         pr.critical_count = sum(1 for f in decision.findings if f.should_publish and f.severity == "critical")
         pr.high_count = sum(1 for f in decision.findings if f.should_publish and f.severity == "high")
-        repo.prs_reviewed_count = (repo.prs_reviewed_count or 0) + 1
+        if first_completion:
+            repo.prs_reviewed_count = (repo.prs_reviewed_count or 0) + 1
         repo.last_review_at = finished
         db.flush()
 
@@ -249,11 +339,7 @@ def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
             "cost_usd": job.estimated_cost_usd,
             "github_review_id": job.github_review_id,
         }
-    except Exception as exc:
-        job.status = "failed"
-        job.error_message = str(exc)
-        job.completed_at = datetime.now(timezone.utc)
-        pr.review_status = "failed"
-        db.flush()
+    except Exception:
+        # Caller rolls back then mark_review_failed persists status.
         logger.exception("review_failed", pr=pr.number)
         raise

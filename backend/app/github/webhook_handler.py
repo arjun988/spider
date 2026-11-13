@@ -248,9 +248,18 @@ def handle_pull_request(
         logger.info("skip_duplicate_review", pr=pr.number, sha=head_sha)
         return {"status": "ok", "action": "skipped_duplicate", "pr": pr.number, "sha": head_sha}
 
-    # Check auto-review settings
+    # Check auto-review settings (repo flag AND org model config)
     if not repository.auto_review_enabled:
         return {"status": "ok", "action": "auto_review_disabled", "pr": pr.number}
+    from app.models.settings import ModelConfiguration
+
+    org_cfg = db.execute(
+        select(ModelConfiguration).where(
+            ModelConfiguration.organization_id == repository.organization_id
+        )
+    ).scalar_one_or_none()
+    if org_cfg and not org_cfg.auto_review_enabled:
+        return {"status": "ok", "action": "org_auto_review_disabled", "pr": pr.number}
 
     job = ReviewJob(
         pull_request_id=pr.id,
@@ -335,20 +344,19 @@ def handle_issue_comment(
         )
         return {"status": "ok", "action": "already_reviewed"}
 
-    # Allow re-review: if force, mark prior job superseded by creating new unique via timestamp suffix
-    # Unique constraint is (pr_id, commit_sha) — for force, update existing failed/completed to allow new
-    if force:
-        from sqlalchemy import delete
-        # Soft approach: delete prior job for same sha so unique allows new (cascade findings)
-        prior = db.execute(
-            select(ReviewJob).where(
-                ReviewJob.pull_request_id == pr.id,
-                ReviewJob.commit_sha == pr.head_sha,
-            )
-        ).scalar_one_or_none()
-        if prior and prior.status in {"completed", "failed"}:
+    # Unique constraint is (pr_id, commit_sha) — reuse or replace any prior job safely.
+    prior = db.execute(
+        select(ReviewJob).where(
+            ReviewJob.pull_request_id == pr.id,
+            ReviewJob.commit_sha == pr.head_sha,
+        )
+    ).scalar_one_or_none()
+    if prior:
+        if force or prior.status == "failed":
             db.delete(prior)
             db.flush()
+        elif already_reviewed_commit(db, pr.id, pr.head_sha):
+            return {"status": "ok", "action": "skipped_duplicate"}
 
     if already_reviewed_commit(db, pr.id, pr.head_sha) and not force:
         return {"status": "ok", "action": "skipped_duplicate"}

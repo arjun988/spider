@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import String, Text
+from sqlalchemy import BigInteger, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -21,7 +21,7 @@ class Organization(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     github_org_login: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
-    github_org_id: Mapped[int | None] = mapped_column(nullable=True, unique=True)
+    github_org_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     installations: Mapped[list[GitHubInstallation]] = relationship(

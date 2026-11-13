@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.routes.github import get_sync_db
 from app.core.config import settings as app_settings
 from app.core.encryption import encrypt_value, mask_secret
+from app.core.security import require_admin_token
 from app.models.organization import Organization
 from app.models.settings import ModelConfiguration
 from app.services.cost_service import budget_remaining
@@ -59,6 +60,20 @@ class SystemStatusOut(BaseModel):
 
 
 def _ensure_default_org(db: Session) -> Organization:
+    """Prefer a GitHub-linked org so BYOK settings apply to real reviews."""
+    org = db.execute(
+        select(Organization)
+        .where(Organization.github_org_id.is_not(None))
+        .order_by(Organization.created_at.asc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if org:
+        return org
+    org = db.execute(
+        select(Organization).where(Organization.slug != "default").limit(1)
+    ).scalar_one_or_none()
+    if org:
+        return org
     org = db.execute(select(Organization).limit(1)).scalar_one_or_none()
     if org:
         return org
@@ -131,7 +146,11 @@ def get_gemini_config(db: Session = Depends(get_sync_db)) -> GeminiConfigOut:
 
 
 @router.put("/gemini", response_model=GeminiConfigOut)
-def update_gemini_config(body: GeminiConfigUpdate, db: Session = Depends(get_sync_db)) -> GeminiConfigOut:
+def update_gemini_config(
+    body: GeminiConfigUpdate,
+    db: Session = Depends(get_sync_db),
+    _: None = Depends(require_admin_token),
+) -> GeminiConfigOut:
     org = _ensure_default_org(db)
     config = _get_or_create_config(db, org)
 

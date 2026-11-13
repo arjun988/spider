@@ -27,18 +27,36 @@ class WebhookAck(BaseModel):
 def _enqueue_from_result(result: dict) -> None:
     if not result:
         return
-    try:
-        from app.workers.tasks import index_repository, review_pull_request
+    from app.workers.tasks import index_repository, review_pull_request
+    import uuid
 
-        if result.get("enqueue_index") and result.get("repository_id"):
+    SessionLocal = get_sync_session_factory()
+    assert SessionLocal is not None
+
+    if result.get("enqueue_index") and result.get("repository_id"):
+        try:
             index_repository.delay(result["repository_id"], True)
-        if result.get("enqueue_review") and result.get("pull_request_id"):
-            review_pull_request.delay(
+        except Exception as exc:
+            logger.exception("enqueue_index_failed", error=str(exc))
+
+    if result.get("enqueue_review") and result.get("pull_request_id"):
+        try:
+            task = review_pull_request.delay(
                 result["pull_request_id"],
                 result["commit_sha"],
             )
-    except Exception as exc:
-        logger.exception("enqueue_failed", error=str(exc))
+            job_id = result.get("review_job_id")
+            if job_id and SessionLocal is not None:
+                from app.models.review import ReviewJob
+
+                with SessionLocal() as db:
+                    job = db.get(ReviewJob, uuid.UUID(str(job_id)))
+                    if job:
+                        job.celery_task_id = task.id
+                        db.commit()
+        except Exception as exc:
+            logger.exception("enqueue_review_failed", error=str(exc), result=result)
+            # Leave job queued with null celery_task_id — reclaim task will pick it up.
 
 
 def _process_in_background(
@@ -57,6 +75,16 @@ def _process_in_background(
     with SessionLocal() as db:
         try:
             result = process_webhook(db, event_type, action, delivery_id, payload)
+            # Soft errors (e.g. install race) stay retryable via GitHub redelivery.
+            if isinstance(result, dict) and result.get("status") == "error":
+                db.rollback()
+                logger.warning(
+                    "webhook_soft_error_not_acked",
+                    delivery_id=delivery_id,
+                    reason=result.get("reason"),
+                    github_event=event_type,
+                )
+                return
             db.commit()
             _enqueue_from_result(result)
         except Exception:

@@ -1,8 +1,10 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { Shell } from "@/components/layout/shell";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import { shortSha } from "@/lib/utils";
@@ -22,14 +24,28 @@ function reviewVariant(status: string) {
 }
 
 export default function PullRequestsPage() {
+  const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ["pull-requests"],
     queryFn: () => api.pullRequests(),
     refetchInterval: 15_000,
   });
 
+  const reReview = useMutation({
+    mutationFn: ({ id, force }: { id: string; force: boolean }) =>
+      api.triggerReview(id, force),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pull-requests"] });
+      qc.invalidateQueries({ queryKey: ["overview"] });
+    },
+  });
+
   return (
-    <Shell title="Pull Requests" description="Reviewed and pending PRs across connected repos">
+    <Shell
+      title="Pull Requests"
+      description="Reviewed and pending PRs across connected repos"
+      breadcrumb="Workspace / Pull Requests"
+    >
       <Card>
         <CardHeader>
           <CardTitle>
@@ -50,19 +66,20 @@ export default function PullRequestsPage() {
                   <th>Review</th>
                   <th>Findings</th>
                   <th>SHA</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {isLoading ? (
                   <tr>
-                    <td colSpan={6} className="!text-muted-foreground">
+                    <td colSpan={7} className="!text-muted-foreground">
                       Loading…
                     </td>
                   </tr>
                 ) : (data?.items.length ?? 0) === 0 ? (
                   <tr>
-                    <td colSpan={6} className="!text-muted-foreground">
-                      No pull requests recorded yet. Webhooks will populate this list in Phase 2.
+                    <td colSpan={7} className="!text-muted-foreground">
+                      No pull requests yet. Open a PR on a connected repo to start a review.
                     </td>
                   </tr>
                 ) : (
@@ -70,8 +87,38 @@ export default function PullRequestsPage() {
                     <tr key={pr.id}>
                       <td>
                         <div className="font-medium">
-                          #{pr.number} {pr.title}
+                          {pr.latest_review_job_id ? (
+                            <Link
+                              href={`/reviews/${pr.latest_review_job_id}`}
+                              className="text-primary hover:underline"
+                            >
+                              #{pr.number} {pr.title}
+                            </Link>
+                          ) : pr.html_url ? (
+                            <a
+                              href={pr.html_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-primary hover:underline"
+                            >
+                              #{pr.number} {pr.title}
+                            </a>
+                          ) : (
+                            <>
+                              #{pr.number} {pr.title}
+                            </>
+                          )}
                         </div>
+                        {pr.html_url ? (
+                          <a
+                            href={pr.html_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[11px] text-muted-foreground hover:underline"
+                          >
+                            Open on GitHub
+                          </a>
+                        ) : null}
                       </td>
                       <td className="text-xs">{pr.repository_full_name || "—"}</td>
                       <td>{pr.author_login}</td>
@@ -89,6 +136,32 @@ export default function PullRequestsPage() {
                         ) : null}
                       </td>
                       <td className="font-mono text-xs">{shortSha(pr.head_sha)}</td>
+                      <td className="space-x-1">
+                        {pr.latest_review_job_id ? (
+                          <Link href={`/reviews/${pr.latest_review_job_id}`}>
+                            <Button size="sm" variant="outline">
+                              Details
+                            </Button>
+                          </Link>
+                        ) : null}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={reReview.isPending}
+                          onClick={() =>
+                            reReview.mutate({
+                              id: pr.id,
+                              force: pr.review_status === "completed",
+                            })
+                          }
+                        >
+                          {pr.review_status === "failed"
+                            ? "Retry"
+                            : pr.review_status === "completed"
+                              ? "Re-review"
+                              : "Review"}
+                        </Button>
+                      </td>
                     </tr>
                   ))
                 )}

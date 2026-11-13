@@ -83,7 +83,7 @@ class ReviewFinding(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
         index=True,
     )
-    finding_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    finding_key: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
     file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     start_line: Mapped[int] = mapped_column(Integer, nullable=False)
     end_line: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -110,7 +110,7 @@ class ReviewFinding(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         index=True,
     )  # pending | verified | rejected | confirmed_static | confirmed_test | unverifiable
     published: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    github_comment_id: Mapped[int | None] = mapped_column(nullable=True)
+    github_comment_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     diff_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rejected_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 

@@ -20,6 +20,8 @@ export default function SettingsPage() {
   const [maxTokens, setMaxTokens] = useState("8192");
   const [budget, setBudget] = useState("100");
   const [severity, setSeverity] = useState("medium");
+  const [confidence, setConfidence] = useState("0.6");
+  const [autoReview, setAutoReview] = useState(true);
   const [maxFiles, setMaxFiles] = useState("50");
   const [contextLimit, setContextLimit] = useState("20");
   const [message, setMessage] = useState<string | null>(null);
@@ -32,6 +34,8 @@ export default function SettingsPage() {
     setMaxTokens(String(gemini.data.max_output_tokens));
     setBudget(String(gemini.data.monthly_budget_usd));
     setSeverity(gemini.data.severity_threshold);
+    setConfidence(String(gemini.data.confidence_threshold));
+    setAutoReview(gemini.data.auto_review_enabled);
     setMaxFiles(String(gemini.data.max_files_per_review));
     setContextLimit(String(gemini.data.context_retrieval_limit));
   }, [gemini.data]);
@@ -46,6 +50,8 @@ export default function SettingsPage() {
         max_output_tokens: Number(maxTokens),
         monthly_budget_usd: Number(budget),
         severity_threshold: severity,
+        confidence_threshold: Number(confidence),
+        auto_review_enabled: autoReview,
         max_files_per_review: Number(maxFiles),
         context_retrieval_limit: Number(contextLimit),
       }),
@@ -58,10 +64,14 @@ export default function SettingsPage() {
   });
 
   const inputClass =
-    "mt-1 w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm outline-none focus:border-primary";
+    "mt-1.5 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none transition-shadow placeholder:text-muted-foreground focus-visible:shadow-focus";
 
   return (
-    <Shell title="Settings" description="GitHub App status and Gemini BYOK configuration">
+    <Shell
+      title="Settings"
+      description="GitHub App status and Gemini BYOK configuration"
+      breadcrumb="System / Settings"
+    >
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -81,7 +91,7 @@ export default function SettingsPage() {
             </div>
             <p className="text-xs text-muted-foreground">
               Set GITHUB_APP_* variables in `.env` and place the private key under `secrets/`.
-              Full install flow arrives in Phase 2.
+              Install the app from the Repositories page, then sync connected repos.
             </p>
           </CardContent>
         </Card>
@@ -108,6 +118,18 @@ export default function SettingsPage() {
                 {gemini.data?.api_key_masked || "not set"}
               </span>
             </div>
+            {gemini.data?.budget ? (
+              <div className="rounded-md border border-border p-3 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Spent this month</span>
+                  <span>${Number(gemini.data.budget.spent_usd ?? 0).toFixed(4)}</span>
+                </div>
+                <div className="mt-1 flex justify-between">
+                  <span className="text-muted-foreground">Remaining</span>
+                  <span>${Number(gemini.data.budget.remaining_usd ?? 0).toFixed(2)}</span>
+                </div>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </div>
@@ -162,8 +184,20 @@ export default function SettingsPage() {
             </select>
           </label>
           <label className="text-xs text-muted-foreground">
+            Confidence threshold
+            <input className={inputClass} value={confidence} onChange={(e) => setConfidence(e.target.value)} />
+          </label>
+          <label className="text-xs text-muted-foreground">
             Monthly budget (USD)
             <input className={inputClass} value={budget} onChange={(e) => setBudget(e.target.value)} />
+          </label>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={autoReview}
+              onChange={(e) => setAutoReview(e.target.checked)}
+            />
+            Org auto-review enabled
           </label>
           <label className="text-xs text-muted-foreground">
             Max files per review

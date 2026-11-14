@@ -1,17 +1,19 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import { QueryProvider } from "@/lib/query-provider";
 import { ThemeProvider } from "@/lib/theme";
 import "./globals.css";
 
-const geistSans = Geist({
+const jakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
-  variable: "--font-geist-sans",
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-sans",
 });
 
-const geistMono = Geist_Mono({
+const jetbrains = JetBrains_Mono({
   subsets: ["latin"],
-  variable: "--font-geist-mono",
+  weight: ["400", "500"],
+  variable: "--font-mono",
 });
 
 export const metadata: Metadata = {
@@ -29,7 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
       </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}>
+      <body className={`${jakarta.variable} ${jetbrains.variable} font-sans antialiased`}>
         <ThemeProvider>
           <QueryProvider>{children}</QueryProvider>
         </ThemeProvider>

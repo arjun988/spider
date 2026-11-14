@@ -60,21 +60,26 @@ const config: Config = {
         },
       },
       fontFamily: {
-        sans: ["var(--font-geist-sans)", "ui-sans-serif", "sans-serif"],
-        mono: ["var(--font-geist-mono)", "ui-monospace", "monospace"],
+        sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
+        mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+        xl: "calc(var(--radius) + 4px)",
       },
       boxShadow: {
         panel: "var(--panel-shadow)",
         focus: "0 0 0 3px hsl(var(--ring) / 0.28)",
       },
       transitionDuration: {
-        fast: "120ms",
-        normal: "180ms",
+        fast: "140ms",
+        normal: "200ms",
+      },
+      letterSpacing: {
+        tighter: "-0.03em",
+        tight: "-0.02em",
       },
     },
   },

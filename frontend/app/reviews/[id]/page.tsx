@@ -58,30 +58,33 @@ export default function ReviewDetailPage() {
   return (
     <Shell
       title="Review details"
-      description="Findings, verification, timeline, and cost"
-      breadcrumb="Workspace / Reviews"
-    >
-      <div className="mb-3">
-        <Link href="/pull-requests" className="text-xs text-primary hover:underline">
-          ← Back to pull requests
+      description="Findings, verification, timeline, and cost."
+      breadcrumb="Workspace"
+      actions={
+        <Link href="/pull-requests">
+          <Button variant="outline" size="sm">
+            ← Pull requests
+          </Button>
         </Link>
-      </div>
-
+      }
+    >
       {error ? (
         <p className="text-sm text-destructive">Failed to load review.</p>
       ) : isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : data ? (
-        <div className="space-y-4">
+        <div className="space-y-6">
           <Card>
-            <CardContent className="flex flex-wrap items-start justify-between gap-4 p-4">
+            <CardContent className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0">
-                <p className="eyebrow mb-1.5">{data.repository_full_name || "repository"}</p>
-                <h2 className="text-lg font-semibold tracking-tight">
+                <p className="eyebrow mb-1.5">
+                  {data.repository_full_name || "repository"}
+                </p>
+                <h2 className="text-[1.25rem] font-semibold tracking-tight">
                   {data.pr_number != null ? `#${data.pr_number} ` : ""}
                   {data.pr_title || "Untitled PR"}
                 </h2>
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <div className="mt-3 flex flex-wrap items-center gap-1.5">
                   <Badge
                     variant={
                       data.status === "completed"
@@ -97,24 +100,21 @@ export default function ReviewDetailPage() {
                   <Badge variant="muted">{data.trigger}</Badge>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {data.pr_html_url ? (
-                  <a href={data.pr_html_url} target="_blank" rel="noreferrer">
-                    <Button variant="outline" size="sm">
-                      Open on GitHub
-                    </Button>
-                  </a>
-                ) : null}
-              </div>
+              {data.pr_html_url ? (
+                <a href={data.pr_html_url} target="_blank" rel="noreferrer">
+                  <Button variant="outline" size="sm">
+                    Open on GitHub
+                  </Button>
+                </a>
+              ) : null}
             </CardContent>
           </Card>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Card>
-              <CardContent className="p-4">
-                <p className="text-xs text-muted-foreground">Status</p>
+              <CardContent className="space-y-2">
+                <p className="eyebrow">Status</p>
                 <Badge
-                  className="mt-1"
                   variant={
                     data.status === "completed"
                       ? "success"
@@ -128,35 +128,42 @@ export default function ReviewDetailPage() {
               </CardContent>
             </Card>
             <Card>
-              <CardContent className="p-4">
-                <p className="text-xs text-muted-foreground">Commit</p>
-                <p className="mt-1 font-mono text-sm">{shortSha(data.commit_sha)}</p>
+              <CardContent className="space-y-2">
+                <p className="eyebrow">Commit</p>
+                <p className="font-mono text-sm tabular-nums">
+                  {shortSha(data.commit_sha)}
+                </p>
               </CardContent>
             </Card>
             <Card>
-              <CardContent className="p-4">
-                <p className="text-xs text-muted-foreground">Duration</p>
-                <p className="mt-1 text-sm">{formatDuration(data.duration_ms)}</p>
+              <CardContent className="space-y-2">
+                <p className="eyebrow">Duration</p>
+                <p className="text-sm tabular-nums">
+                  {formatDuration(data.duration_ms)}
+                </p>
               </CardContent>
             </Card>
             <Card>
-              <CardContent className="p-4">
-                <p className="text-xs text-muted-foreground">API cost</p>
-                <p className="mt-1 text-sm">{formatUsd(data.estimated_cost_usd || 0)}</p>
+              <CardContent className="space-y-2">
+                <p className="eyebrow">API cost</p>
+                <p className="text-sm tabular-nums">
+                  {formatUsd(data.estimated_cost_usd || 0)}
+                </p>
                 <p className="text-[11px] text-muted-foreground">
-                  {data.input_tokens}/{data.output_tokens} tokens · {data.model_name || "—"}
+                  {data.input_tokens}/{data.output_tokens} tokens ·{" "}
+                  {data.model_name || "—"}
                 </p>
               </CardContent>
             </Card>
           </div>
 
           {data.error_message ? (
-            <Card className="border-destructive/40">
+            <Card className="border-destructive/40 bg-destructive/5">
               <CardHeader>
                 <CardTitle>Error</CardTitle>
               </CardHeader>
               <CardContent>
-                <pre className="whitespace-pre-wrap text-sm text-destructive">
+                <pre className="whitespace-pre-wrap font-mono text-[13px] text-destructive">
                   {data.error_message}
                 </pre>
               </CardContent>
@@ -168,28 +175,34 @@ export default function ReviewDetailPage() {
               <CardTitle>Summary</CardTitle>
             </CardHeader>
             <CardContent>
-              <pre className="whitespace-pre-wrap text-sm text-muted-foreground">
+              <pre className="whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
                 {data.summary || "No summary"}
               </pre>
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
-              <CardTitle>
-                Findings ({findings.length}/{data.findings?.length ?? 0}) · published{" "}
-                {data.published_count} · rejected {data.rejected_count}
-              </CardTitle>
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+              <div>
+                <CardTitle>
+                  Findings ({findings.length}/{data.findings?.length ?? 0})
+                </CardTitle>
+                <p className="mt-1 text-[12px] text-muted-foreground">
+                  published {data.published_count} · rejected {data.rejected_count}
+                </p>
+              </div>
               <select
-                className="rounded-sm border border-border bg-card px-2 py-1 text-xs"
+                className="rounded-lg border border-input bg-background px-3 py-2 text-[12px] outline-none focus-visible:shadow-focus"
                 value={severityFilter}
                 onChange={(e) => setSeverityFilter(e.target.value)}
               >
-                {["all", "critical", "high", "medium", "low", "informational"].map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
+                {["all", "critical", "high", "medium", "low", "informational"].map(
+                  (s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ),
+                )}
               </select>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -197,35 +210,54 @@ export default function ReviewDetailPage() {
                 <p className="text-xs text-muted-foreground">{feedbackMsg}</p>
               ) : null}
               {findings.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No findings in this filter.</p>
+                <p className="text-sm text-muted-foreground">
+                  No findings in this filter.
+                </p>
               ) : (
                 findings.map((f) => (
-                  <div key={f.id} className="rounded-md border border-border p-3">
+                  <div
+                    key={f.id}
+                    className="rounded-xl border border-border bg-muted/20 p-4"
+                  >
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant={sevVariant(f.severity)}>{f.severity}</Badge>
                       <Badge variant="muted">{f.category}</Badge>
                       <Badge variant="muted">{f.verification_status}</Badge>
-                      {f.published ? <Badge variant="success">published</Badge> : null}
-                      <span className="text-sm font-medium">{f.title}</span>
+                      {f.published ? (
+                        <Badge variant="success">published</Badge>
+                      ) : null}
+                      <span className="text-[13px] font-medium tracking-tight">
+                        {f.title}
+                      </span>
                     </div>
-                    <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-                      {f.file_path}:{f.start_line}-{f.end_line} · conf {f.confidence?.toFixed?.(2)}
+                    <p className="mt-2 font-mono text-[11px] text-muted-foreground">
+                      {f.file_path}:{f.start_line}-{f.end_line} · conf{" "}
+                      {f.confidence?.toFixed?.(2)}
                     </p>
-                    <p className="mt-2 text-sm">{f.explanation}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">{f.failure_scenario}</p>
+                    <p className="mt-2 text-[13px] leading-relaxed">{f.explanation}</p>
+                    <p className="mt-1 text-[13px] text-muted-foreground">
+                      {f.failure_scenario}
+                    </p>
                     {f.suggested_fix ? (
-                      <p className="mt-1 text-sm text-primary">Suggested fix: {f.suggested_fix}</p>
+                      <p className="mt-2 text-[13px] text-primary">
+                        Suggested fix: {f.suggested_fix}
+                      </p>
                     ) : null}
                     {f.rejected_reason ? (
-                      <p className="mt-1 text-xs text-destructive">Rejected: {f.rejected_reason}</p>
+                      <p className="mt-1 text-xs text-destructive">
+                        Rejected: {f.rejected_reason}
+                      </p>
                     ) : null}
-                    <div className="mt-2 flex flex-wrap gap-1">
+                    <div className="mt-3 flex flex-wrap gap-1.5">
                       <Button
                         size="sm"
                         variant="outline"
                         disabled={feedback.isPending}
                         onClick={() =>
-                          feedback.mutate({ findingId: f.id, feedback_type: "helpful" })
+                          feedback.mutate({
+                            findingId: f.id,
+                            feedback_type: "helpful",
+                          })
                         }
                       >
                         Helpful
@@ -235,7 +267,10 @@ export default function ReviewDetailPage() {
                         variant="ghost"
                         disabled={feedback.isPending}
                         onClick={() =>
-                          feedback.mutate({ findingId: f.id, feedback_type: "false_positive" })
+                          feedback.mutate({
+                            findingId: f.id,
+                            feedback_type: "false_positive",
+                          })
                         }
                       >
                         False positive
@@ -245,7 +280,10 @@ export default function ReviewDetailPage() {
                         variant="ghost"
                         disabled={feedback.isPending}
                         onClick={() =>
-                          feedback.mutate({ findingId: f.id, feedback_type: "dismissed" })
+                          feedback.mutate({
+                            findingId: f.id,
+                            feedback_type: "dismissed",
+                          })
                         }
                       >
                         Dismiss
@@ -262,15 +300,22 @@ export default function ReviewDetailPage() {
               <CardTitle>Timeline</CardTitle>
             </CardHeader>
             <CardContent>
-              <ul className="space-y-1 text-sm">
+              <ul className="space-y-2">
                 {(data.timeline ?? []).length === 0 ? (
-                  <li className="text-muted-foreground">No timeline events.</li>
+                  <li className="text-sm text-muted-foreground">
+                    No timeline events.
+                  </li>
                 ) : (
                   (data.timeline ?? []).map((t, i) => (
-                    <li key={i} className="font-mono text-xs text-muted-foreground">
+                    <li
+                      key={i}
+                      className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2 font-mono text-[11px] text-muted-foreground"
+                    >
                       {String(t.stage)}: {String(t.status)}
                       {t.count != null ? ` (${String(t.count)})` : ""}
-                      {t.published != null ? ` published=${String(t.published)}` : ""}
+                      {t.published != null
+                        ? ` published=${String(t.published)}`
+                        : ""}
                     </li>
                   ))
                 )}

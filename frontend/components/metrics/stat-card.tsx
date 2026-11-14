@@ -23,26 +23,26 @@ export function StatCard({
   }[tone];
 
   return (
-    <Card className="overflow-hidden">
-      <CardContent className="relative p-4 sm:p-5">
+    <Card className="overflow-hidden transition-colors duration-fast hover:border-primary/25">
+      <CardContent className="p-5">
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
+          <div className="min-w-0 space-y-2.5">
             <p className="eyebrow">{label}</p>
             <p
               className={cn(
-                "mt-2 text-[1.75rem] font-semibold leading-none tracking-tight tabular",
+                "text-[1.875rem] font-semibold leading-none tracking-tighter tabular",
                 toneClass,
               )}
             >
               {value}
             </p>
             {hint ? (
-              <p className="mt-2 text-[11px] leading-snug text-muted-foreground">{hint}</p>
+              <p className="text-[12px] leading-snug text-muted-foreground">{hint}</p>
             ) : null}
           </div>
           {Icon ? (
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted/70 text-muted-foreground">
-              <Icon className="h-4 w-4" strokeWidth={1.75} />
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-muted/60 text-muted-foreground">
+              <Icon className="h-4 w-4" strokeWidth={1.6} />
             </div>
           ) : null}
         </div>

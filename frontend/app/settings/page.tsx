@@ -87,13 +87,13 @@ export default function SettingsPage() {
   });
 
   const inputClass =
-    "mt-1.5 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none transition-shadow placeholder:text-muted-foreground focus-visible:shadow-focus";
+    "mt-1.5 w-full rounded-lg border border-input bg-background px-3 py-2.5 text-[13px] tracking-tight outline-none transition-shadow placeholder:text-muted-foreground focus-visible:shadow-focus";
 
   return (
     <Shell
       title="Settings"
-      description="LLM provider, GitHub App status, and review thresholds"
-      breadcrumb="System / Settings"
+      description="LLM provider, GitHub App status, and review thresholds."
+      breadcrumb="System"
     >
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
@@ -171,7 +171,7 @@ export default function SettingsPage() {
         </Card>
       </div>
 
-      <Card className="mt-4">
+      <Card>
         <CardHeader>
           <CardTitle>LLM configuration</CardTitle>
           <CardDescription>

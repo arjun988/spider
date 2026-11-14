@@ -1,6 +1,8 @@
-"""Settings and Gemini BYOK configuration endpoints."""
+"""Settings and LLM BYOK configuration endpoints (Gemini default, LiteLLM optional)."""
 
 from __future__ import annotations
+
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -19,10 +21,14 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 
 
 class GeminiConfigOut(BaseModel):
+    """Kept name for API compatibility; covers Gemini + LiteLLM."""
+
     configured: bool
     api_key_masked: str | None
     api_key_validated: bool
     connection_status: str
+    llm_provider: Literal["gemini", "litellm"] = "gemini"
+    litellm_base_url: str | None = None
     primary_model: str
     embedding_model: str
     temperature: float
@@ -38,6 +44,8 @@ class GeminiConfigOut(BaseModel):
 
 class GeminiConfigUpdate(BaseModel):
     api_key: str | None = None
+    llm_provider: Literal["gemini", "litellm"] | None = None
+    litellm_base_url: str | None = None
     primary_model: str | None = None
     embedding_model: str | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
@@ -55,6 +63,8 @@ class SystemStatusOut(BaseModel):
     github_app_configured: bool
     github_app_id: str | None
     gemini_env_configured: bool
+    litellm_env_configured: bool = False
+    llm_provider: str = "gemini"
     app_env: str
     app_name: str
 
@@ -89,17 +99,29 @@ def _get_or_create_config(db: Session, org: Organization) -> ModelConfiguration:
     ).scalar_one_or_none()
     if config:
         return config
+    provider = app_settings.llm_provider
     config = ModelConfiguration(
         organization_id=org.id,
-        primary_model=app_settings.gemini_model,
-        embedding_model=app_settings.gemini_embedding_model,
+        llm_provider=provider,
+        litellm_base_url=app_settings.litellm_base_url or None,
+        primary_model=(
+            app_settings.litellm_model if provider == "litellm" else app_settings.gemini_model
+        ),
+        embedding_model=(
+            app_settings.litellm_embedding_model
+            if provider == "litellm"
+            else app_settings.gemini_embedding_model
+        ),
         temperature=app_settings.gemini_temperature,
         max_output_tokens=app_settings.gemini_max_output_tokens,
         monthly_budget_usd=app_settings.monthly_budget_usd,
     )
-    if app_settings.gemini_api_key:
-        config.encrypted_api_key = encrypt_value(app_settings.gemini_api_key)
-        config.api_key_last_four = app_settings.gemini_api_key[-4:]
+    bootstrap_key = (
+        app_settings.litellm_api_key if provider == "litellm" else app_settings.gemini_api_key
+    )
+    if bootstrap_key:
+        config.encrypted_api_key = encrypt_value(bootstrap_key)
+        config.api_key_last_four = bootstrap_key[-4:]
         config.connection_status = "connected"
         config.api_key_validated = False
     db.add(config)
@@ -108,11 +130,19 @@ def _get_or_create_config(db: Session, org: Organization) -> ModelConfiguration:
 
 
 def _config_to_out(db: Session, config: ModelConfiguration) -> GeminiConfigOut:
+    provider = (config.llm_provider or "gemini").lower()
+    if provider not in {"gemini", "litellm"}:
+        provider = "gemini"
+    configured = bool(config.encrypted_api_key) or (
+        provider == "litellm" and bool(config.litellm_base_url)
+    )
     return GeminiConfigOut(
-        configured=bool(config.encrypted_api_key),
+        configured=configured,
         api_key_masked=mask_secret(f"****{config.api_key_last_four}") if config.api_key_last_four else None,
         api_key_validated=config.api_key_validated,
         connection_status=config.connection_status,
+        llm_provider=provider,  # type: ignore[arg-type]
+        litellm_base_url=config.litellm_base_url,
         primary_model=config.primary_model,
         embedding_model=config.embedding_model,
         temperature=config.temperature,
@@ -133,20 +163,28 @@ def system_status() -> SystemStatusOut:
         github_app_configured=app_settings.github_app_configured,
         github_app_id=app_settings.github_app_id or None,
         gemini_env_configured=app_settings.gemini_configured,
+        litellm_env_configured=app_settings.litellm_configured,
+        llm_provider=app_settings.llm_provider,
         app_env=app_settings.app_env,
         app_name=app_settings.app_name,
     )
 
 
-@router.get("/gemini", response_model=GeminiConfigOut)
-def get_gemini_config(db: Session = Depends(get_sync_db)) -> GeminiConfigOut:
+def _get_config(db: Session) -> GeminiConfigOut:
     org = _ensure_default_org(db)
     config = _get_or_create_config(db, org)
     return _config_to_out(db, config)
 
 
+@router.get("/gemini", response_model=GeminiConfigOut)
+@router.get("/llm", response_model=GeminiConfigOut)
+def get_llm_config(db: Session = Depends(get_sync_db)) -> GeminiConfigOut:
+    return _get_config(db)
+
+
 @router.put("/gemini", response_model=GeminiConfigOut)
-def update_gemini_config(
+@router.put("/llm", response_model=GeminiConfigOut)
+def update_llm_config(
     body: GeminiConfigUpdate,
     db: Session = Depends(get_sync_db),
     _: None = Depends(require_admin_token),
@@ -154,22 +192,37 @@ def update_gemini_config(
     org = _ensure_default_org(db)
     config = _get_or_create_config(db, org)
 
+    if body.llm_provider is not None:
+        config.llm_provider = body.llm_provider
+    if body.litellm_base_url is not None:
+        url = body.litellm_base_url.strip()
+        config.litellm_base_url = url or None
+
+    provider = (body.llm_provider or config.llm_provider or "gemini").lower()
+
     if body.api_key is not None:
         key = body.api_key.strip()
         if key:
-            if len(key) < 20:
+            if provider == "gemini" and len(key) < 20:
                 raise HTTPException(status_code=400, detail="API key appears invalid")
             if body.validate_key:
                 try:
-                    from app.services.gemini_client import validate_api_key
+                    from app.services.llm_client import validate_connection
 
-                    model = body.primary_model or config.primary_model or app_settings.gemini_model
-                    ok, detail = validate_api_key(key, model)
+                    model = body.primary_model or config.primary_model
+                    base = body.litellm_base_url if body.litellm_base_url is not None else config.litellm_base_url
+                    ok, detail = validate_connection(
+                        provider=provider,  # type: ignore[arg-type]
+                        api_key=key,
+                        model=model,
+                        litellm_base_url=base,
+                    )
                     if not ok:
                         config.connection_status = "invalid"
+                        label = "LiteLLM" if provider == "litellm" else "Gemini"
                         raise HTTPException(
                             status_code=400,
-                            detail=f"Gemini API key validation failed ({model}): {detail}",
+                            detail=f"{label} validation failed ({model}): {detail}",
                         )
                     config.api_key_validated = True
                     config.connection_status = "connected"
@@ -184,10 +237,38 @@ def update_gemini_config(
                 config.connection_status = "connected"
                 config.api_key_validated = False
         else:
+            # Empty string clears key (LiteLLM may still work with local proxy + no key)
             config.encrypted_api_key = None
             config.api_key_last_four = None
-            config.connection_status = "not_configured"
+            if provider == "litellm" and (config.litellm_base_url or body.litellm_base_url):
+                config.connection_status = "connected"
+            else:
+                config.connection_status = "not_configured"
             config.api_key_validated = False
+
+    # Switching to LiteLLM with base URL but no key change — validate connectivity optionally
+    if (
+        provider == "litellm"
+        and body.validate_key
+        and body.api_key is None
+        and (body.litellm_base_url is not None or body.llm_provider == "litellm")
+        and config.litellm_base_url
+    ):
+        from app.core.encryption import decrypt_value
+        from app.services.llm_client import validate_connection
+
+        existing_key = decrypt_value(config.encrypted_api_key) if config.encrypted_api_key else ""
+        model = body.primary_model or config.primary_model
+        ok, detail = validate_connection(
+            provider="litellm",
+            api_key=existing_key,
+            model=model,
+            litellm_base_url=config.litellm_base_url,
+        )
+        config.api_key_validated = ok
+        config.connection_status = "connected" if ok else "invalid"
+        if not ok:
+            raise HTTPException(status_code=400, detail=f"LiteLLM validation failed ({model}): {detail}")
 
     for field in (
         "primary_model",
@@ -210,23 +291,36 @@ def update_gemini_config(
 
 
 @router.post("/gemini/validate")
-def validate_gemini(db: Session = Depends(get_sync_db)) -> dict:
+@router.post("/llm/validate")
+def validate_llm(db: Session = Depends(get_sync_db)) -> dict:
     org = _ensure_default_org(db)
     config = _get_or_create_config(db, org)
-    if not config.encrypted_api_key:
+    provider = (config.llm_provider or "gemini").lower()
+    if provider == "gemini" and not config.encrypted_api_key:
         raise HTTPException(status_code=400, detail="No API key configured")
-    from app.core.encryption import decrypt_value
-    from app.services.gemini_client import validate_api_key
+    if provider == "litellm" and not config.litellm_base_url:
+        raise HTTPException(status_code=400, detail="LiteLLM base URL not configured")
 
+    from app.core.encryption import decrypt_value
+    from app.services.llm_client import validate_connection
+
+    key = decrypt_value(config.encrypted_api_key) if config.encrypted_api_key else ""
     try:
-        ok, detail = validate_api_key(
-            decrypt_value(config.encrypted_api_key),
-            config.primary_model or app_settings.gemini_model,
+        ok, detail = validate_connection(
+            provider=provider,  # type: ignore[arg-type]
+            api_key=key,
+            model=config.primary_model,
+            litellm_base_url=config.litellm_base_url,
         )
         config.api_key_validated = ok
         config.connection_status = "connected" if ok else "invalid"
         db.flush()
-        return {"valid": ok, "connection_status": config.connection_status, "detail": detail}
+        return {
+            "valid": ok,
+            "provider": provider,
+            "connection_status": config.connection_status,
+            "detail": detail,
+        }
     except Exception as exc:
         config.connection_status = "error"
         db.flush()

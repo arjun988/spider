@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.agents.schemas import FindingDraft, VerificationDecision
-from app.services.gemini_client import generate_json
+from app.services.llm_client import generate_json
 
 SYSTEM = """You independently verify code-review findings.
 Reject speculative, incorrect, already-handled, or non-actionable findings.

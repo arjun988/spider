@@ -8,11 +8,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
 
+type Provider = "gemini" | "litellm";
+
 export default function SettingsPage() {
   const qc = useQueryClient();
   const system = useQuery({ queryKey: ["system"], queryFn: api.systemStatus });
   const gemini = useQuery({ queryKey: ["gemini"], queryFn: api.geminiConfig });
 
+  const [provider, setProvider] = useState<Provider>("gemini");
+  const [litellmBaseUrl, setLitellmBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [primaryModel, setPrimaryModel] = useState("");
   const [embeddingModel, setEmbeddingModel] = useState("");
@@ -28,6 +32,8 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (!gemini.data) return;
+    setProvider(gemini.data.llm_provider || "gemini");
+    setLitellmBaseUrl(gemini.data.litellm_base_url || "");
     setPrimaryModel(gemini.data.primary_model);
     setEmbeddingModel(gemini.data.embedding_model);
     setTemperature(String(gemini.data.temperature));
@@ -43,6 +49,8 @@ export default function SettingsPage() {
   const save = useMutation({
     mutationFn: () =>
       api.updateGeminiConfig({
+        llm_provider: provider,
+        litellm_base_url: provider === "litellm" ? litellmBaseUrl.trim() : litellmBaseUrl.trim() || null,
         ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
         primary_model: primaryModel,
         embedding_model: embeddingModel,
@@ -54,10 +62,25 @@ export default function SettingsPage() {
         auto_review_enabled: autoReview,
         max_files_per_review: Number(maxFiles),
         context_retrieval_limit: Number(contextLimit),
+        validate_key: true,
       }),
     onSuccess: () => {
       setApiKey("");
-      setMessage("Settings saved. API keys are encrypted at rest and never returned in full.");
+      setMessage("Settings saved. Keys are encrypted at rest and never returned in full.");
+      qc.invalidateQueries({ queryKey: ["gemini"] });
+      qc.invalidateQueries({ queryKey: ["system"] });
+    },
+    onError: (err: Error) => setMessage(err.message),
+  });
+
+  const validate = useMutation({
+    mutationFn: () => api.validateLlm(),
+    onSuccess: (res) => {
+      setMessage(
+        res.valid
+          ? `${res.provider} connected — ${res.detail}`
+          : `${res.provider} invalid — ${res.detail}`,
+      );
       qc.invalidateQueries({ queryKey: ["gemini"] });
     },
     onError: (err: Error) => setMessage(err.message),
@@ -69,7 +92,7 @@ export default function SettingsPage() {
   return (
     <Shell
       title="Settings"
-      description="GitHub App status and Gemini BYOK configuration"
+      description="LLM provider, GitHub App status, and review thresholds"
       breadcrumb="System / Settings"
     >
       <div className="grid gap-4 lg:grid-cols-2">
@@ -98,10 +121,16 @@ export default function SettingsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Gemini connection</CardTitle>
-            <CardDescription>Bring Your Own Key — never exposed to the browser in full.</CardDescription>
+            <CardTitle>LLM connection</CardTitle>
+            <CardDescription>
+              Gemini is the default. Switch to LiteLLM to route through any OpenAI-compatible proxy.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Provider</span>
+              <Badge variant="accent">{gemini.data?.llm_provider ?? "gemini"}</Badge>
+            </div>
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Status</span>
               <Badge
@@ -118,6 +147,14 @@ export default function SettingsPage() {
                 {gemini.data?.api_key_masked || "not set"}
               </span>
             </div>
+            {gemini.data?.llm_provider === "litellm" && gemini.data.litellm_base_url ? (
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">LiteLLM URL</span>
+                <span className="truncate font-mono text-[11px]">
+                  {gemini.data.litellm_base_url}
+                </span>
+              </div>
+            ) : null}
             {gemini.data?.budget ? (
               <div className="rounded-md border border-border p-3 text-xs">
                 <div className="flex justify-between">
@@ -136,21 +173,64 @@ export default function SettingsPage() {
 
       <Card className="mt-4">
         <CardHeader>
-          <CardTitle>Gemini configuration</CardTitle>
+          <CardTitle>LLM configuration</CardTitle>
           <CardDescription>
-            Model names are centralized here — agents read from this config, not hardcoded strings.
+            Agents read models from this config. LiteLLM model IDs look like{" "}
+            <span className="font-mono">gemini/gemini-2.5-flash</span> or{" "}
+            <span className="font-mono">openai/gpt-4o</span>.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <label className="text-xs text-muted-foreground sm:col-span-2">
-            API key
+            Provider
+            <select
+              className={inputClass}
+              value={provider}
+              onChange={(e) => {
+                const next = e.target.value as Provider;
+                setProvider(next);
+                if (next === "litellm" && !primaryModel.includes("/")) {
+                  setPrimaryModel("gemini/gemini-2.5-flash");
+                  setEmbeddingModel("gemini/text-embedding-004");
+                }
+                if (next === "gemini" && primaryModel.includes("/")) {
+                  setPrimaryModel("gemini-2.5-flash");
+                  setEmbeddingModel("gemini-embedding-001");
+                }
+              }}
+            >
+              <option value="gemini">Gemini (default — Google GenAI SDK)</option>
+              <option value="litellm">LiteLLM (OpenAI-compatible proxy)</option>
+            </select>
+          </label>
+
+          {provider === "litellm" ? (
+            <label className="text-xs text-muted-foreground sm:col-span-2">
+              LiteLLM base URL
+              <input
+                className={inputClass}
+                placeholder="http://localhost:4000"
+                value={litellmBaseUrl}
+                onChange={(e) => setLitellmBaseUrl(e.target.value)}
+              />
+              <span className="mt-1 block text-[11px] text-muted-foreground">
+                Spider calls <span className="font-mono">/v1/chat/completions</span> and{" "}
+                <span className="font-mono">/v1/embeddings</span> on this host.
+              </span>
+            </label>
+          ) : null}
+
+          <label className="text-xs text-muted-foreground sm:col-span-2">
+            {provider === "litellm" ? "LiteLLM API key (optional for local proxies)" : "Gemini API key"}
             <input
               type="password"
               className={inputClass}
               placeholder={
-                gemini.data?.configured
+                gemini.data?.api_key_masked
                   ? "Leave blank to keep existing key"
-                  : "Paste Gemini API key"
+                  : provider === "litellm"
+                    ? "LiteLLM master key / provider key"
+                    : "Paste Gemini API key"
               }
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
@@ -208,9 +288,16 @@ export default function SettingsPage() {
             <input className={inputClass} value={contextLimit} onChange={(e) => setContextLimit(e.target.value)} />
           </label>
 
-          <div className="flex items-center gap-3 sm:col-span-2">
+          <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
             <Button onClick={() => save.mutate()} disabled={save.isPending}>
               {save.isPending ? "Saving…" : "Save settings"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => validate.mutate()}
+              disabled={validate.isPending}
+            >
+              {validate.isPending ? "Testing…" : "Test connection"}
             </Button>
             {message ? <p className="text-xs text-muted-foreground">{message}</p> : null}
           </div>

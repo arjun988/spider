@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.services.gemini_client import embed_texts
+from app.services.llm_client import embed_texts
 
 
 def embed_chunks(

@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.agents.schemas import FindingDraft
-from app.services.gemini_client import generate_json
+from app.services.llm_client import generate_json
 
 SYSTEM = """You analyze whether a PR's tests adequately cover risky behavior changes.
 Only report high-value missing coverage for risky logic — not every missing unit test.

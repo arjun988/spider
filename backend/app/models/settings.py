@@ -37,6 +37,10 @@ class ModelConfiguration(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         default="not_configured",
     )  # not_configured | connected | invalid | rate_limited | error
 
+    # gemini (default) | litellm
+    llm_provider: Mapped[str] = mapped_column(String(50), nullable=False, default="gemini")
+    litellm_base_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
     primary_model: Mapped[str] = mapped_column(String(255), nullable=False, default="gemini-2.5-flash")
     embedding_model: Mapped[str] = mapped_column(
         String(255),

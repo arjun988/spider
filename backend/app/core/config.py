@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     github_app_webhook_secret: str = ""
     github_app_name: str = ""
 
+    # LLM provider: gemini (default) | litellm
+    llm_provider: Literal["gemini", "litellm"] = "gemini"
+
     # Gemini (centralized — never hardcode model names elsewhere)
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
@@ -53,6 +56,12 @@ class Settings(BaseSettings):
     gemini_temperature: float = 0.1
     gemini_max_output_tokens: int = 8192
     gemini_embedding_dimensions: int = 768
+
+    # LiteLLM OpenAI-compatible proxy (optional)
+    litellm_base_url: str = ""
+    litellm_api_key: str = ""
+    litellm_model: str = "gemini/gemini-2.5-flash"
+    litellm_embedding_model: str = "gemini/text-embedding-004"
 
     # Review defaults
     review_auto_enabled: bool = True
@@ -89,6 +98,16 @@ class Settings(BaseSettings):
     @property
     def gemini_configured(self) -> bool:
         return bool(self.gemini_api_key)
+
+    @property
+    def litellm_configured(self) -> bool:
+        return bool(self.litellm_base_url)
+
+    @property
+    def llm_configured(self) -> bool:
+        if self.llm_provider == "litellm":
+            return self.litellm_configured
+        return self.gemini_configured
 
     @property
     def github_app_configured(self) -> bool:

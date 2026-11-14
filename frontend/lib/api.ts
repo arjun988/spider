@@ -92,6 +92,8 @@ export interface GeminiConfig {
   api_key_masked: string | null;
   api_key_validated: boolean;
   connection_status: string;
+  llm_provider: "gemini" | "litellm";
+  litellm_base_url: string | null;
   primary_model: string;
   embedding_model: string;
   temperature: number;
@@ -113,6 +115,8 @@ export interface SystemStatus {
   github_app_configured: boolean;
   github_app_id: string | null;
   gemini_env_configured: boolean;
+  litellm_env_configured?: boolean;
+  llm_provider?: string;
   app_env: string;
   app_name: string;
 }
@@ -139,12 +143,19 @@ export const api = {
     );
   },
   systemStatus: () => request<SystemStatus>("/api/settings/system"),
-  geminiConfig: () => request<GeminiConfig>("/api/settings/gemini"),
-  updateGeminiConfig: (body: Partial<GeminiConfig> & { api_key?: string }) =>
-    request<GeminiConfig>("/api/settings/gemini", {
+  geminiConfig: () => request<GeminiConfig>("/api/settings/llm"),
+  updateGeminiConfig: (
+    body: Partial<GeminiConfig> & { api_key?: string; validate_key?: boolean },
+  ) =>
+    request<GeminiConfig>("/api/settings/llm", {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  validateLlm: () =>
+    request<{ valid: boolean; provider: string; connection_status: string; detail: string }>(
+      "/api/settings/llm/validate",
+      { method: "POST" },
+    ),
   triggerReview: (prId: string, force = false) =>
     request<{ status: string; review_job_id: string; task_id?: string; job_status?: string }>(
       `/api/pull-requests/${prId}/review?force=${force ? "true" : "false"}`,

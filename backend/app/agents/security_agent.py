@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.agents.schemas import FindingDraft
-from app.services.gemini_client import generate_json
+from app.services.llm_client import generate_json
 
 SYSTEM = """You are an application security engineer.
 Report only concrete, exploitable issues with a failure scenario.

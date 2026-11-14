@@ -7,7 +7,7 @@ const variants = {
   secondary:
     "border border-border bg-secondary text-secondary-foreground hover:bg-muted",
   outline:
-    "border border-border bg-card text-foreground hover:bg-muted/80",
+    "border border-border bg-card/80 text-foreground hover:bg-muted/80",
   ghost:
     "text-muted-foreground hover:bg-muted hover:text-foreground",
   destructive:
@@ -15,10 +15,10 @@ const variants = {
 };
 
 const sizes = {
-  default: "h-8 gap-1.5 px-3 text-xs",
-  sm: "h-7 gap-1 px-2.5 text-[11px]",
-  lg: "h-9 gap-2 px-4 text-sm",
-  icon: "h-8 w-8",
+  default: "h-9 gap-1.5 px-3.5 text-[13px]",
+  sm: "h-8 gap-1.5 px-3 text-xs",
+  lg: "h-10 gap-2 px-4 text-sm",
+  icon: "h-9 w-9",
 };
 
 export function Button({
@@ -33,7 +33,7 @@ export function Button({
   return (
     <button
       className={cn(
-        "inline-flex items-center justify-center rounded-md font-medium transition-all duration-fast focus-visible:outline-none focus-visible:shadow-focus disabled:pointer-events-none disabled:opacity-45",
+        "inline-flex items-center justify-center rounded-lg font-medium tracking-tight transition-all duration-fast focus-visible:outline-none focus-visible:shadow-focus disabled:pointer-events-none disabled:opacity-45",
         variants[variant],
         sizes[size],
         className,

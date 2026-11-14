@@ -2,77 +2,85 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Spider design system — dual theme
-   Dark: Linear/Vercel charcoal surfaces, one accent, semantic status only
-   Light: Stripe-like cool neutrals, hairline borders, restrained accent */
+/*
+  Spider design system — slate + indigo/sky
+  Research basis: SaaS slate/indigo dashboards, dark-mode elevation via surface steps,
+  accent reserved for actions (not decoration). Green only for success semantics.
+*/
 
 :root {
-  --background: 210 20% 98%;
-  --foreground: 222 30% 12%;
+  /* Light — cool slate canvas, indigo actions */
+  --background: 210 40% 98%;
+  --foreground: 222 47% 11%;
   --card: 0 0% 100%;
-  --card-foreground: 222 30% 12%;
+  --card-foreground: 222 47% 11%;
   --popover: 0 0% 100%;
-  --popover-foreground: 222 30% 12%;
-  --primary: 173 72% 32%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 239 84% 67%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 210 16% 95%;
-  --secondary-foreground: 222 20% 22%;
-  --muted: 210 14% 94%;
-  --muted-foreground: 215 12% 42%;
-  --accent: 173 65% 36%;
+  --secondary: 214 32% 95%;
+  --secondary-foreground: 222 30% 18%;
+  --muted: 210 30% 96%;
+  --muted-foreground: 215 16% 42%;
+  --accent: 239 84% 67%;
   --accent-foreground: 0 0% 100%;
-  --destructive: 0 72% 48%;
+  --destructive: 0 72% 51%;
   --destructive-foreground: 0 0% 100%;
-  --border: 214 18% 88%;
-  --input: 214 18% 88%;
-  --ring: 173 72% 32%;
-  --success: 152 55% 34%;
-  --warning: 36 92% 44%;
+  --border: 214 32% 90%;
+  --input: 214 32% 90%;
+  --ring: 239 84% 67%;
+  --success: 160 84% 30%;
+  --warning: 32 95% 44%;
   --sidebar: 0 0% 100%;
-  --sidebar-foreground: 222 20% 22%;
-  --sidebar-active: 173 40% 95%;
-  --sidebar-border: 214 18% 90%;
-  --chart-1: 173 65% 36%;
-  --chart-2: 210 70% 48%;
-  --chart-3: 36 92% 48%;
-  --chart-grid: 214 18% 90%;
-  --chart-tick: 215 12% 48%;
-  --radius: 0.5rem;
-  --panel-shadow: 0 1px 2px hsl(222 30% 12% / 0.04), 0 0 0 1px hsl(214 18% 88% / 0.6);
+  --sidebar-foreground: 222 30% 18%;
+  --sidebar-active: 239 80% 96%;
+  --sidebar-border: 214 32% 92%;
+  --chart-1: 239 84% 67%;
+  --chart-2: 199 89% 48%;
+  --chart-3: 32 95% 48%;
+  --chart-grid: 214 32% 90%;
+  --chart-tick: 215 16% 46%;
+  --radius: 0.625rem;
+  --panel-shadow:
+    0 1px 2px hsl(222 47% 11% / 0.04),
+    0 8px 24px hsl(222 47% 11% / 0.04);
 }
 
 .dark {
-  --background: 222 28% 7%;
-  --foreground: 210 20% 94%;
-  --card: 222 24% 10%;
-  --card-foreground: 210 20% 94%;
-  --popover: 222 24% 11%;
-  --popover-foreground: 210 20% 94%;
-  --primary: 173 58% 42%;
-  --primary-foreground: 222 28% 7%;
-  --secondary: 222 20% 14%;
-  --secondary-foreground: 210 16% 88%;
-  --muted: 222 18% 13%;
-  --muted-foreground: 215 12% 58%;
-  --accent: 173 55% 44%;
-  --accent-foreground: 222 28% 7%;
-  --destructive: 0 68% 55%;
+  /* Dark — layered slate/navy, soft indigo accent (no green/cyan brand) */
+  --background: 224 28% 6%;
+  --foreground: 220 20% 96%;
+  --card: 224 24% 9%;
+  --card-foreground: 220 20% 96%;
+  --popover: 224 24% 10%;
+  --popover-foreground: 220 20% 96%;
+  --primary: 234 78% 72%;
+  --primary-foreground: 224 28% 8%;
+  --secondary: 224 18% 14%;
+  --secondary-foreground: 220 16% 92%;
+  --muted: 224 16% 12%;
+  --muted-foreground: 220 12% 64%;
+  --accent: 234 78% 72%;
+  --accent-foreground: 224 28% 8%;
+  --destructive: 0 70% 58%;
   --destructive-foreground: 0 0% 100%;
-  --border: 222 16% 16%;
-  --input: 222 16% 18%;
-  --ring: 173 58% 42%;
-  --success: 152 50% 45%;
-  --warning: 38 88% 52%;
-  --sidebar: 222 26% 8%;
-  --sidebar-foreground: 210 16% 88%;
-  --sidebar-active: 173 28% 14%;
-  --sidebar-border: 222 16% 14%;
-  --chart-1: 173 55% 48%;
-  --chart-2: 199 75% 55%;
-  --chart-3: 38 88% 55%;
-  --chart-grid: 222 16% 18%;
-  --chart-tick: 215 12% 55%;
-  --panel-shadow: 0 0 0 1px hsl(222 16% 16%);
+  --border: 224 14% 16%;
+  --input: 224 14% 17%;
+  --ring: 234 78% 72%;
+  --success: 152 48% 46%;
+  --warning: 38 84% 54%;
+  --sidebar: 224 26% 7%;
+  --sidebar-foreground: 220 16% 92%;
+  --sidebar-active: 234 32% 16%;
+  --sidebar-border: 224 14% 13%;
+  --chart-1: 234 78% 72%;
+  --chart-2: 199 70% 55%;
+  --chart-3: 38 84% 54%;
+  --chart-grid: 224 14% 17%;
+  --chart-tick: 220 12% 58%;
+  --panel-shadow:
+    0 0 0 1px hsl(224 14% 16%),
+    0 12px 32px hsl(224 28% 2% / 0.45);
 }
 
 * {
@@ -87,32 +95,40 @@ body {
 body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
-  font-feature-settings: "ss01" 1, "cv11" 1, "tnum" 1;
+  font-feature-settings: "ss01" 1, "ss02" 1, "cv11" 1, "tnum" 1;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  letter-spacing: -0.011em;
 }
 
-.dark body,
 html.dark body {
   background-image:
-    radial-gradient(900px 420px at 0% -10%, hsl(173 58% 42% / 0.07), transparent 55%),
-    radial-gradient(700px 380px at 100% 0%, hsl(199 75% 50% / 0.05), transparent 50%);
+    radial-gradient(1000px 520px at 8% -8%, hsl(234 78% 62% / 0.1), transparent 55%),
+    radial-gradient(800px 420px at 100% 0%, hsl(260 60% 50% / 0.05), transparent 50%);
   background-attachment: fixed;
 }
 
 html:not(.dark) body {
   background-image:
-    radial-gradient(1000px 480px at 100% -5%, hsl(173 40% 92% / 0.7), transparent 50%),
-    linear-gradient(180deg, hsl(210 25% 99%) 0%, hsl(210 20% 98%) 100%);
+    radial-gradient(1100px 520px at 100% -10%, hsl(239 80% 94% / 0.85), transparent 52%),
+    linear-gradient(180deg, hsl(210 40% 99%) 0%, hsl(210 40% 98%) 100%);
   background-attachment: fixed;
 }
 
 .eyebrow {
-  @apply font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground;
+  @apply font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground;
+}
+
+.page-title {
+  @apply text-[1.5rem] font-semibold leading-tight tracking-[-0.03em] text-foreground;
+}
+
+.section-title {
+  @apply text-sm font-semibold tracking-[-0.01em] text-foreground;
 }
 
 .panel {
-  @apply rounded-lg border border-border bg-card;
+  @apply rounded-xl border border-border bg-card;
   box-shadow: var(--panel-shadow);
 }
 
@@ -121,11 +137,11 @@ html:not(.dark) body {
 }
 
 .data-table th {
-  @apply border-b border-border bg-muted/50 px-3.5 py-2.5 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground;
+  @apply border-b border-border bg-muted/40 px-4 py-3 font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground;
 }
 
 .data-table td {
-  @apply border-b border-border/80 px-3.5 py-3 align-middle text-sm text-foreground;
+  @apply border-b border-border/70 px-4 py-3.5 align-middle text-[13px] text-foreground;
 }
 
 .data-table tr:last-child td {
@@ -133,11 +149,11 @@ html:not(.dark) body {
 }
 
 .data-table tbody tr {
-  transition: background-color 120ms ease;
+  transition: background-color 140ms ease;
 }
 
 .data-table tr:hover td {
-  @apply bg-muted/60;
+  @apply bg-muted/50;
 }
 
 .tabular {
@@ -150,7 +166,7 @@ html:not(.dark) body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted-foreground) / 0.28);
+  background: hsl(var(--muted-foreground) / 0.26);
   border: 2px solid transparent;
   background-clip: padding-box;
   border-radius: 999px;

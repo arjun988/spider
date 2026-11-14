@@ -19,6 +19,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import { formatUsd } from "@/lib/utils";
 
+const tooltipStyle = {
+  background: "hsl(var(--card))",
+  border: "1px solid hsl(var(--border))",
+  borderRadius: 10,
+  color: "hsl(var(--foreground))",
+  boxShadow: "var(--panel-shadow)",
+  fontSize: 12,
+};
+
 export default function AnalyticsPage() {
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
   const usage = useQuery({ queryKey: ["usage"], queryFn: () => api.usage(30) });
@@ -27,37 +36,49 @@ export default function AnalyticsPage() {
   return (
     <Shell
       title="Usage & Cost"
-      description="Gemini API expenditure derived from recorded usage events"
-      breadcrumb="Workspace / Analytics"
+      description="API expenditure derived from recorded usage events."
+      breadcrumb="Workspace"
     >
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          label="Total spend"
-          value={overview.isLoading ? "…" : formatUsd(m?.total_api_spend_usd ?? 0)}
-          tone="accent"
-        />
-        <StatCard label="PRs reviewed" value={overview.isLoading ? "…" : (m?.total_prs_reviewed ?? 0)} />
-        <StatCard label="Findings" value={overview.isLoading ? "…" : (m?.total_findings ?? 0)} />
-        <StatCard
-          label="Cost / PR"
-          value={
-            overview.isLoading
-              ? "…"
-              : formatUsd(
-                  m && m.total_prs_reviewed > 0
-                    ? m.total_api_spend_usd / m.total_prs_reviewed
-                    : 0,
-                )
-          }
-        />
-      </div>
+      <section className="space-y-3">
+        <div>
+          <p className="eyebrow">Spend</p>
+          <h2 className="section-title">Cost snapshot</h2>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard
+            label="Total spend"
+            value={overview.isLoading ? "…" : formatUsd(m?.total_api_spend_usd ?? 0)}
+            tone="accent"
+          />
+          <StatCard
+            label="PRs reviewed"
+            value={overview.isLoading ? "…" : (m?.total_prs_reviewed ?? 0)}
+          />
+          <StatCard
+            label="Findings"
+            value={overview.isLoading ? "…" : (m?.total_findings ?? 0)}
+          />
+          <StatCard
+            label="Cost / PR"
+            value={
+              overview.isLoading
+                ? "…"
+                : formatUsd(
+                    m && m.total_prs_reviewed > 0
+                      ? m.total_api_spend_usd / m.total_prs_reviewed
+                      : 0,
+                  )
+            }
+          />
+        </div>
+      </section>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <section className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Daily API spend (30d)</CardTitle>
           </CardHeader>
-          <CardContent className="h-64">
+          <CardContent className="h-64 pt-2">
             {usage.error ? (
               <p className="text-sm text-destructive">Failed to load usage data.</p>
             ) : (usage.data?.timeseries?.length ?? 0) === 0 ? (
@@ -66,17 +87,19 @@ export default function AnalyticsPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={usage.data.timeseries}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--chart-grid))" />
-                  <XAxis dataKey="date" tick={{ fill: "hsl(var(--chart-tick))", fontSize: 11 }} />
-                  <YAxis tick={{ fill: "hsl(var(--chart-tick))", fontSize: 11 }} />
-                  <Tooltip
-                    contentStyle={{
-                      background: "hsl(var(--card))",
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: 8,
-                      color: "hsl(var(--foreground))",
-                    }}
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fill: "hsl(var(--chart-tick))", fontSize: 11 }}
                   />
-                  <Line type="monotone" dataKey="cost_usd" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={false} />
+                  <YAxis tick={{ fill: "hsl(var(--chart-tick))", fontSize: 11 }} />
+                  <Tooltip contentStyle={tooltipStyle} />
+                  <Line
+                    type="monotone"
+                    dataKey="cost_usd"
+                    stroke="hsl(var(--chart-1))"
+                    strokeWidth={2}
+                    dot={false}
+                  />
                 </LineChart>
               </ResponsiveContainer>
             )}
@@ -87,23 +110,19 @@ export default function AnalyticsPage() {
           <CardHeader>
             <CardTitle>Review volume</CardTitle>
           </CardHeader>
-          <CardContent className="h-64">
+          <CardContent className="h-64 pt-2">
             {(usage.data?.reviews?.length ?? 0) === 0 ? (
               <p className="text-sm text-muted-foreground">No reviews yet.</p>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={usage.data.reviews}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--chart-grid))" />
-                  <XAxis dataKey="date" tick={{ fill: "hsl(var(--chart-tick))", fontSize: 11 }} />
-                  <YAxis tick={{ fill: "hsl(var(--chart-tick))", fontSize: 11 }} />
-                  <Tooltip
-                    contentStyle={{
-                      background: "hsl(var(--card))",
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: 8,
-                      color: "hsl(var(--foreground))",
-                    }}
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fill: "hsl(var(--chart-tick))", fontSize: 11 }}
                   />
+                  <YAxis tick={{ fill: "hsl(var(--chart-tick))", fontSize: 11 }} />
+                  <Tooltip contentStyle={tooltipStyle} />
                   <Legend />
                   <Bar dataKey="reviews" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="findings" fill="hsl(var(--chart-3))" radius={[4, 4, 0, 0]} />
@@ -112,9 +131,9 @@ export default function AnalyticsPage() {
             )}
           </CardContent>
         </Card>
-      </div>
+      </section>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <section className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Model breakdown</CardTitle>
@@ -141,10 +160,12 @@ export default function AnalyticsPage() {
                   usage.data!.models.map((row: any) => (
                     <tr key={row.model}>
                       <td className="font-mono text-xs">{row.model}</td>
-                      <td>{row.requests}</td>
-                      <td>{row.input_tokens}</td>
-                      <td>{row.output_tokens}</td>
-                      <td>{formatUsd(row.cost_usd)}</td>
+                      <td className="tabular-nums">{row.requests}</td>
+                      <td className="tabular-nums">{row.input_tokens}</td>
+                      <td className="tabular-nums">{row.output_tokens}</td>
+                      <td className="font-mono text-xs tabular-nums">
+                        {formatUsd(row.cost_usd)}
+                      </td>
                     </tr>
                   ))
                 )}
@@ -176,9 +197,11 @@ export default function AnalyticsPage() {
                 ) : (
                   usage.data!.by_repository.map((row) => (
                     <tr key={row.repository}>
-                      <td className="text-xs">{row.repository}</td>
-                      <td>{row.reviews}</td>
-                      <td>{formatUsd(row.cost_usd)}</td>
+                      <td className="text-[13px]">{row.repository}</td>
+                      <td className="tabular-nums">{row.reviews}</td>
+                      <td className="font-mono text-xs tabular-nums">
+                        {formatUsd(row.cost_usd)}
+                      </td>
                     </tr>
                   ))
                 )}
@@ -186,7 +209,7 @@ export default function AnalyticsPage() {
             </table>
           </CardContent>
         </Card>
-      </div>
+      </section>
     </Shell>
   );
 }

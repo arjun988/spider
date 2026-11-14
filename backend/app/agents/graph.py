@@ -17,6 +17,7 @@ from app.agents.verifier import verify_findings
 from app.core.logging import get_logger
 from app.models.repository import Repository
 from app.models.settings import ModelConfiguration
+from app.services.feedback_signals import compute_feedback_signals
 
 logger = get_logger(__name__)
 
@@ -62,6 +63,12 @@ def run_review_pipeline(
 
     files = files[:max_files]
 
+    try:
+        feedback_signals = compute_feedback_signals(db, org_id)
+    except Exception as exc:
+        logger.warning("feedback_signals_failed", error=str(exc))
+        feedback_signals = {}
+
     timeline.append({"stage": "change_analyzer", "status": "started"})
     analysis, meta = analyze_changes(
         pr_title, pr_body, files,
@@ -105,11 +112,24 @@ def run_review_pipeline(
 
     timeline.append({"stage": "verifier", "status": "started"})
     verified, meta = verify_findings(
-        all_findings, files, contexts,
-        db=db, organization_id=org_id, review_job_id=review_job_id, repository_id=repository.id,
+        all_findings,
+        files,
+        contexts,
+        db=db,
+        organization_id=org_id,
+        review_job_id=review_job_id,
+        repository_id=repository.id,
+        feedback_signals=feedback_signals,
     )
     _merge_usage(usage, meta)
-    timeline.append({"stage": "verifier", "status": "completed", "count": len(verified)})
+    timeline.append(
+        {
+            "stage": "verifier",
+            "status": "completed",
+            "count": len(verified),
+            "feedback_categories": list((feedback_signals or {}).get("category_fp_rate") or {}),
+        }
+    )
 
     timeline.append({"stage": "decision", "status": "started"})
     decision = prioritize_findings(
@@ -117,6 +137,7 @@ def run_review_pipeline(
         analysis.summary,
         severity_threshold=sev,
         confidence_threshold=conf,
+        feedback_signals=feedback_signals,
     )
     timeline.append({
         "stage": "decision",

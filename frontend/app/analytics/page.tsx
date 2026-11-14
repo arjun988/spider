@@ -38,6 +38,20 @@ export default function AnalyticsPage() {
       title="Usage & Cost"
       description="API expenditure derived from recorded usage events."
       breadcrumb="Workspace"
+      actions={
+        <>
+          <a href={api.exportUsageUrl(30)}>
+            <button className="inline-flex h-8 items-center rounded-lg border border-border bg-card px-3 text-xs font-medium hover:bg-muted">
+              Export usage CSV
+            </button>
+          </a>
+          <a href={api.exportFindingsUrl(30)}>
+            <button className="inline-flex h-8 items-center rounded-lg border border-border bg-card px-3 text-xs font-medium hover:bg-muted">
+              Export findings CSV
+            </button>
+          </a>
+        </>
+      }
     >
       <section className="space-y-3">
         <div>

@@ -85,6 +85,12 @@ class Repository(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         back_populates="repository",
         cascade="all, delete-orphan",
     )
+    review_rules = relationship(
+        "RepositoryReviewRules",
+        back_populates="repository",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
 
 class RepositoryFile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -134,6 +140,7 @@ class RepositoryIndexJob(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     from_commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
     to_commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
     files_processed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_files: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     chunks_created: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     symbols_created: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

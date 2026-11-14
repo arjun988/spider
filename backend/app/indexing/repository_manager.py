@@ -99,13 +99,22 @@ def index_repository(db: Session, repository_id: str | uuid.UUID, full: bool = F
         job.to_commit_sha = sha
 
         files = discover_files(Path(path))
+        # Apply repo language allow-list when configured
+        from app.models.rules import RepositoryReviewRules
+
+        rules = db.execute(
+            select(RepositoryReviewRules).where(RepositoryReviewRules.repository_id == repo.id)
+        ).scalar_one_or_none()
+        if rules and rules.enabled_languages:
+            allowed = {str(x).lower() for x in rules.enabled_languages}
+            files = [f for f in files if (f.get("language") or "").lower() in allowed]
+
         # Incremental: only reindex changed content hashes when not full
         existing_hashes: dict[str, str] = {}
         if job.job_type == "incremental" and repo.last_indexed_commit_sha:
             rows = db.execute(
                 select(RepositoryFile).where(
                     RepositoryFile.repository_id == repo.id,
-                    RepositoryFile.commit_sha == repo.last_indexed_commit_sha,
                 )
             ).scalars().all()
             existing_hashes = {r.path: r.content_hash for r in rows}
@@ -115,6 +124,10 @@ def index_repository(db: Session, repository_id: str | uuid.UUID, full: bool = F
             if job.job_type == "incremental" and existing_hashes.get(f["path"]) == f["content_hash"]:
                 continue
             changed_files.append(f)
+
+        job.total_files = len(changed_files if job.job_type == "incremental" else files)
+        job.files_processed = 0
+        db.flush()
 
         if job.job_type == "full":
             db.execute(delete(CodeChunk).where(CodeChunk.repository_id == repo.id))
@@ -143,13 +156,36 @@ def index_repository(db: Session, repository_id: str | uuid.UUID, full: bool = F
                         RepositoryFile.path == f["path"],
                     )
                 )
+            # Prune files deleted from the tree
+            current_paths = {f["path"] for f in files}
+            stale_paths = [p for p in existing_hashes if p not in current_paths]
+            for path in stale_paths:
+                db.execute(
+                    delete(CodeChunk).where(
+                        CodeChunk.repository_id == repo.id,
+                        CodeChunk.file_path == path,
+                    )
+                )
+                db.execute(
+                    delete(CodeSymbol).where(
+                        CodeSymbol.repository_id == repo.id,
+                        CodeSymbol.file_path == path,
+                    )
+                )
+                db.execute(
+                    delete(RepositoryFile).where(
+                        RepositoryFile.repository_id == repo.id,
+                        RepositoryFile.path == path,
+                    )
+                )
             db.flush()
 
         new_version = repo.index_version + 1
         chunk_payloads: list[tuple] = []
         symbols_created = 0
+        work_list = changed_files if job.job_type == "incremental" else files
 
-        for f in changed_files if job.job_type == "incremental" else files:
+        for idx, f in enumerate(work_list):
             db.add(
                 RepositoryFile(
                     repository_id=repo.id,
@@ -201,6 +237,10 @@ def index_repository(db: Session, repository_id: str | uuid.UUID, full: bool = F
             chunks = chunk_file(f["path"], f["content"], f["language"], symbols)
             for ch in chunks:
                 chunk_payloads.append(ch)
+
+            job.files_processed = idx + 1
+            if (idx + 1) % 5 == 0 or (idx + 1) == len(work_list):
+                db.flush()
 
         # Embeddings
         vectors: list[list[float]] = []

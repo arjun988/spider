@@ -142,3 +142,59 @@ class GitHubClient:
     def authenticated_clone_url(self, owner: str, repo: str) -> str:
         """Clone URL with installation token embedded (server-side only)."""
         return f"https://x-access-token:{self._token}@github.com/{owner}/{repo}.git"
+
+    def create_check_run(
+        self,
+        owner: str,
+        repo: str,
+        *,
+        name: str,
+        head_sha: str,
+        status: str = "queued",
+        conclusion: str | None = None,
+        title: str | None = None,
+        summary: str | None = None,
+        details_url: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "name": name,
+            "head_sha": head_sha,
+            "status": status,
+        }
+        if details_url:
+            payload["details_url"] = details_url
+        if status == "completed":
+            payload["conclusion"] = conclusion or "neutral"
+            payload["output"] = {
+                "title": title or name,
+                "summary": summary or "",
+            }
+        elif title or summary:
+            payload["output"] = {
+                "title": title or name,
+                "summary": summary or "",
+            }
+        return self.post(f"/repos/{owner}/{repo}/check-runs", json=payload)
+
+    def update_check_run(
+        self,
+        owner: str,
+        repo: str,
+        check_run_id: int,
+        *,
+        status: str | None = None,
+        conclusion: str | None = None,
+        title: str | None = None,
+        summary: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if status:
+            payload["status"] = status
+        if status == "completed" or conclusion:
+            payload["conclusion"] = conclusion or "neutral"
+        if title or summary:
+            payload["output"] = {
+                "title": title or "Spider Review",
+                "summary": summary or "",
+            }
+        return self.patch(f"/repos/{owner}/{repo}/check-runs/{check_run_id}", json=payload)

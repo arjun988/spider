@@ -1,11 +1,14 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Shell } from "@/components/layout/shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { api } from "@/lib/api";
+import { authHeaders } from "@/lib/auth";
 import { shortSha } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -27,6 +30,11 @@ function statusVariant(status: string) {
 
 export default function RepositoriesPage() {
   const qc = useQueryClient();
+  const [rulesRepoId, setRulesRepoId] = useState<string | null>(null);
+  const [ignorePaths, setIgnorePaths] = useState("");
+  const [severity, setSeverity] = useState("medium");
+  const [confidence, setConfidence] = useState("0.7");
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["repositories"],
     queryFn: api.repositories,
@@ -35,28 +43,38 @@ export default function RepositoriesPage() {
   const github = useQuery({
     queryKey: ["github-status"],
     queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/github/status`);
+      const res = await fetch(`${API_URL}/api/github/status`, { headers: authHeaders() });
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
   });
+  const indexJobs = useQuery({
+    queryKey: ["index-jobs", rulesRepoId],
+    queryFn: () => api.indexJobs(rulesRepoId!),
+    enabled: !!rulesRepoId,
+    refetchInterval: 4000,
+  });
 
   const reindex = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await fetch(`${API_URL}/api/repositories/${id}/reindex?full=true`, {
-        method: "POST",
-      });
+    mutationFn: async ({ id, full }: { id: string; full: boolean }) => {
+      const res = await fetch(
+        `${API_URL}/api/repositories/${id}/reindex?full=${full ? "true" : "false"}`,
+        { method: "POST", headers: authHeaders() },
+      );
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["repositories"] }),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ["repositories"] });
+      qc.invalidateQueries({ queryKey: ["index-jobs", vars.id] });
+    },
   });
 
   const toggleAuto = useMutation({
     mutationFn: async ({ id, enabled }: { id: string; enabled: boolean }) => {
       const res = await fetch(
         `${API_URL}/api/repositories/${id}/auto-review?enabled=${enabled}`,
-        { method: "POST" },
+        { method: "POST", headers: authHeaders() },
       );
       if (!res.ok) throw new Error(await res.text());
       return res.json();
@@ -68,13 +86,41 @@ export default function RepositoriesPage() {
     mutationFn: async (installationId: number) => {
       const res = await fetch(
         `${API_URL}/api/github/installations/${installationId}/sync-repos`,
-        { method: "POST" },
+        { method: "POST", headers: authHeaders() },
       );
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["repositories"] }),
   });
+
+  const saveRules = useMutation({
+    mutationFn: async () => {
+      if (!rulesRepoId) return;
+      return api.putRepoRules(rulesRepoId, {
+        ignore_paths: ignorePaths
+          .split("\n")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        severity_threshold: severity,
+        confidence_threshold: Number(confidence),
+      });
+    },
+  });
+
+  async function openRules(id: string) {
+    setRulesRepoId(id);
+    try {
+      const rules = await api.getRepoRules(id);
+      setIgnorePaths((rules.ignore_paths || []).join("\n"));
+      setSeverity(rules.severity_threshold || "medium");
+      setConfidence(String(rules.confidence_threshold ?? 0.7));
+    } catch {
+      setIgnorePaths("");
+      setSeverity("medium");
+      setConfidence("0.7");
+    }
+  }
 
   return (
     <Shell
@@ -155,13 +201,18 @@ export default function RepositoriesPage() {
                         Loading…
                       </td>
                     </tr>
-                  ) : (data?.items.length ?? 0) === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="!text-muted-foreground">
-                        No repositories yet. Install the GitHub App and sync.
-                      </td>
-                    </tr>
-                  ) : (
+                ) : (data?.items.length ?? 0) === 0 ? (
+                  <tr>
+                    <td colSpan={7}>
+                      <EmptyState
+                        title="No repositories yet"
+                        description="Install the GitHub App and sync an organization to pull repos into Spider."
+                        actionHref="/onboarding"
+                        actionLabel="Open onboarding"
+                      />
+                    </td>
+                  </tr>
+                ) : (
                     data?.items.map((repo) => (
                       <tr key={repo.id}>
                         <td>
@@ -202,10 +253,21 @@ export default function RepositoriesPage() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => reindex.mutate(repo.id)}
+                              onClick={() => reindex.mutate({ id: repo.id, full: false })}
                               disabled={reindex.isPending}
                             >
                               Re-index
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => reindex.mutate({ id: repo.id, full: true })}
+                              disabled={reindex.isPending}
+                            >
+                              Full
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => openRules(repo.id)}>
+                              Rules
                             </Button>
                             <Button
                               size="sm"
@@ -230,6 +292,61 @@ export default function RepositoriesPage() {
           </CardContent>
         </Card>
       </section>
+
+      {rulesRepoId ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Review rules</CardTitle>
+            <CardDescription>
+              Per-repo ignore paths and thresholds. Progress:{" "}
+              {indexJobs.data?.latest
+                ? `${indexJobs.data.latest.progress_pct}% (${indexJobs.data.latest.files_processed}/${indexJobs.data.latest.total_files})`
+                : "—"}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs text-muted-foreground sm:col-span-2">
+              Ignore paths (one per line)
+              <textarea
+                className="mt-1.5 min-h-24 w-full rounded-lg border border-input bg-background px-3 py-2 text-[13px]"
+                value={ignorePaths}
+                onChange={(e) => setIgnorePaths(e.target.value)}
+                placeholder={"vendor/**\n*.generated.ts"}
+              />
+            </label>
+            <label className="text-xs text-muted-foreground">
+              Severity threshold
+              <select
+                className="mt-1.5 w-full rounded-lg border border-input bg-background px-3 py-2 text-[13px]"
+                value={severity}
+                onChange={(e) => setSeverity(e.target.value)}
+              >
+                {["critical", "high", "medium", "low"].map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-muted-foreground">
+              Confidence threshold
+              <input
+                className="mt-1.5 w-full rounded-lg border border-input bg-background px-3 py-2 text-[13px]"
+                value={confidence}
+                onChange={(e) => setConfidence(e.target.value)}
+              />
+            </label>
+            <div className="flex gap-2 sm:col-span-2">
+              <Button size="sm" onClick={() => saveRules.mutate()} disabled={saveRules.isPending}>
+                {saveRules.isPending ? "Saving…" : "Save rules"}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setRulesRepoId(null)}>
+                Close
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
     </Shell>
   );
 }

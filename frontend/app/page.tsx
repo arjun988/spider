@@ -13,7 +13,8 @@ import {
 import { Shell } from "@/components/layout/shell";
 import { StatCard } from "@/components/metrics/stat-card";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { ConfigBanner, EmptyState } from "@/components/ui/empty-state";
 import { api } from "@/lib/api";
 import { formatDuration, formatUsd } from "@/lib/utils";
 
@@ -23,8 +24,13 @@ export default function OverviewPage() {
     queryFn: api.overview,
     refetchInterval: 30_000,
   });
+  const system = useQuery({ queryKey: ["system"], queryFn: api.systemStatus });
+  const llm = useQuery({ queryKey: ["gemini"], queryFn: api.geminiConfig });
 
   const m = data?.metrics;
+  const needsGithub = system.data && !system.data.github_app_configured;
+  const needsLlm =
+    llm.data && !llm.data.configured && llm.data.connection_status !== "connected";
 
   return (
     <Shell
@@ -39,6 +45,15 @@ export default function OverviewPage() {
             {process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}.
           </CardContent>
         </Card>
+      ) : null}
+      {needsGithub ? (
+        <ConfigBanner
+          message="GitHub App is not configured — webhooks and reviews will not run."
+          href="/onboarding"
+        />
+      ) : null}
+      {needsLlm ? (
+        <ConfigBanner message="LLM provider is not connected — add a key to start reviewing." />
       ) : null}
 
       <section className="space-y-3">
@@ -114,10 +129,17 @@ export default function OverviewPage() {
               <tbody>
                 {(m?.recent_reviews ?? []).length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="!text-muted-foreground">
-                      {isLoading
-                        ? "Loading…"
-                        : "No reviews yet. Install the GitHub App, sync a repo, then open a PR."}
+                    <td colSpan={6}>
+                      {isLoading ? (
+                        <span className="text-muted-foreground">Loading…</span>
+                      ) : (
+                        <EmptyState
+                          title="No reviews yet"
+                          description="Install the GitHub App, sync a repo, then open a PR — or follow the onboarding checklist."
+                          actionHref="/onboarding"
+                          actionLabel="Open onboarding"
+                        />
+                      )}
                     </td>
                   </tr>
                 ) : (

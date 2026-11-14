@@ -47,6 +47,7 @@ def run_review_pipeline(
     files: list[dict[str, Any]],
     *,
     review_job_id=None,
+    policy_section: str | None = None,
 ) -> tuple[ReviewDecision, list[dict], list[dict]]:
     """Execute the multi-stage review. Returns decision, usage metas, timeline."""
     usage: list[dict] = []
@@ -96,6 +97,7 @@ def run_review_pipeline(
     secs, meta = review_security(
         analysis.summary, files, contexts,
         db=db, organization_id=org_id, review_job_id=review_job_id, repository_id=repository.id,
+        policy_section=policy_section,
     )
     _merge_usage(usage, meta)
     all_findings.extend(secs)
@@ -105,6 +107,7 @@ def run_review_pipeline(
     tests, meta = review_tests(
         analysis.summary, files, contexts,
         db=db, organization_id=org_id, review_job_id=review_job_id, repository_id=repository.id,
+        policy_section=policy_section,
     )
     _merge_usage(usage, meta)
     all_findings.extend(tests)

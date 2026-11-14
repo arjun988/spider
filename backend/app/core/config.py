@@ -48,7 +48,9 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
     auth_jwt_ttl_hours: int = 72
     sentry_dsn: str = ""
+    # Only honored when app_env == "development". Staging/production always require auth.
     auth_disabled_in_dev: bool = True
+    require_auth: bool = False  # when True, even development requires SSO/JWT
 
     # LLM provider: gemini (default) | litellm
     llm_provider: Literal["gemini", "litellm"] = "gemini"

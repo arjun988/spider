@@ -114,6 +114,8 @@ class ReviewFinding(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     github_comment_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     diff_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rejected_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Explainability: gates that fired, policy hits, feedback floors, etc.
+    decision_trace: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     review_job: Mapped[ReviewJob] = relationship(back_populates="findings")
     verification: Mapped[VerificationResult | None] = relationship(

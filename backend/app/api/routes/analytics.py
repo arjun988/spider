@@ -10,11 +10,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.routes.github import get_sync_db
+from app.core.security import AuthContext, require_user
 from app.models.pull_request import PullRequest
 from app.models.repository import Repository
 from app.models.review import ReviewFinding, ReviewJob
 from app.models.usage import ApiUsageRecord
 from app.services.analytics_service import cost_per_repo, model_breakdown, review_volume, usage_timeseries
+from app.services.scorecard import eval_harness, quality_scorecard
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -36,7 +38,10 @@ class OverviewResponse(BaseModel):
 
 
 @router.get("/overview", response_model=OverviewResponse)
-def get_overview(db: Session = Depends(get_sync_db)) -> OverviewResponse:
+def get_overview(
+    db: Session = Depends(get_sync_db),
+    _: AuthContext = Depends(require_user),
+) -> OverviewResponse:
     total_repos = db.scalar(select(func.count()).select_from(Repository)) or 0
     total_prs = db.scalar(
         select(func.count()).select_from(ReviewJob).where(ReviewJob.status == "completed")
@@ -96,10 +101,32 @@ def get_overview(db: Session = Depends(get_sync_db)) -> OverviewResponse:
 
 
 @router.get("/usage")
-def get_usage(days: int = Query(default=30, ge=1, le=365), db: Session = Depends(get_sync_db)) -> dict:
+def get_usage(
+    days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(get_sync_db),
+    _: AuthContext = Depends(require_user),
+) -> dict:
     return {
         "timeseries": usage_timeseries(db, days=days),
         "models": model_breakdown(db, days=days),
         "reviews": review_volume(db, days=days),
         "by_repository": cost_per_repo(db),
     }
+
+
+@router.get("/scorecard")
+def get_scorecard(
+    days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(get_sync_db),
+    auth: AuthContext = Depends(require_user),
+) -> dict:
+    return quality_scorecard(db, organization_id=auth.organization_id, days=days)
+
+
+@router.get("/eval")
+def get_eval(
+    days: int = Query(default=90, ge=7, le=365),
+    db: Session = Depends(get_sync_db),
+    auth: AuthContext = Depends(require_user),
+) -> dict:
+    return eval_harness(db, organization_id=auth.organization_id, days=days)

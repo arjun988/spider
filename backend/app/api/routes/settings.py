@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -12,10 +12,11 @@ from sqlalchemy.orm import Session
 from app.api.routes.github import get_sync_db
 from app.core.config import settings as app_settings
 from app.core.encryption import encrypt_value, mask_secret
-from app.core.security import require_admin_token
+from app.core.security import AuthContext, require_admin_token, require_user
 from app.models.organization import Organization
 from app.models.settings import ModelConfiguration
 from app.services.cost_service import budget_remaining
+from app.services.policy import normalize_policy_pack
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -31,6 +32,8 @@ class GeminiConfigOut(BaseModel):
     litellm_base_url: str | None = None
     primary_model: str
     embedding_model: str
+    triage_model: str | None = None
+    verify_model: str | None = None
     temperature: float
     max_output_tokens: int
     auto_review_enabled: bool
@@ -40,6 +43,10 @@ class GeminiConfigOut(BaseModel):
     context_retrieval_limit: int
     monthly_budget_usd: float
     budget: dict | None = None
+    policy_pack: dict[str, Any] | None = None
+    block_on_secrets: bool = True
+    block_on_critical: bool = True
+    require_spider_check: bool = True
 
 
 class GeminiConfigUpdate(BaseModel):
@@ -48,6 +55,8 @@ class GeminiConfigUpdate(BaseModel):
     litellm_base_url: str | None = None
     primary_model: str | None = None
     embedding_model: str | None = None
+    triage_model: str | None = None
+    verify_model: str | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     max_output_tokens: int | None = Field(default=None, ge=256, le=65536)
     auto_review_enabled: bool | None = None
@@ -56,6 +65,10 @@ class GeminiConfigUpdate(BaseModel):
     max_files_per_review: int | None = Field(default=None, ge=1, le=500)
     context_retrieval_limit: int | None = Field(default=None, ge=1, le=100)
     monthly_budget_usd: float | None = Field(default=None, ge=0.0)
+    policy_pack: dict[str, Any] | None = None
+    block_on_secrets: bool | None = None
+    block_on_critical: bool | None = None
+    require_spider_check: bool | None = None
     validate_key: bool = True
 
 
@@ -67,6 +80,11 @@ class SystemStatusOut(BaseModel):
     llm_provider: str = "gemini"
     app_env: str
     app_name: str
+    auth_required: bool = False
+    github_oauth_configured: bool = False
+    webhook_secret_configured: bool = False
+    private_key_configured: bool = False
+    frontend_url: str | None = None
 
 
 def _ensure_default_org(db: Session) -> Organization:
@@ -145,6 +163,8 @@ def _config_to_out(db: Session, config: ModelConfiguration) -> GeminiConfigOut:
         litellm_base_url=config.litellm_base_url,
         primary_model=config.primary_model,
         embedding_model=config.embedding_model,
+        triage_model=config.triage_model,
+        verify_model=config.verify_model,
         temperature=config.temperature,
         max_output_tokens=config.max_output_tokens,
         auto_review_enabled=config.auto_review_enabled,
@@ -154,11 +174,23 @@ def _config_to_out(db: Session, config: ModelConfiguration) -> GeminiConfigOut:
         context_retrieval_limit=config.context_retrieval_limit,
         monthly_budget_usd=config.monthly_budget_usd,
         budget=budget_remaining(db, config.organization_id),
+        policy_pack=normalize_policy_pack(config.policy_pack),
+        block_on_secrets=bool(config.block_on_secrets),
+        block_on_critical=bool(config.block_on_critical),
+        require_spider_check=bool(config.require_spider_check),
     )
 
 
 @router.get("/system", response_model=SystemStatusOut)
 def system_status() -> SystemStatusOut:
+    from pathlib import Path
+
+    auth_required = (
+        app_settings.app_env in {"staging", "production"}
+        or app_settings.require_auth
+        or not (app_settings.app_env == "development" and app_settings.auth_disabled_in_dev)
+    )
+    key_path = Path(app_settings.github_app_private_key_path)
     return SystemStatusOut(
         github_app_configured=app_settings.github_app_configured,
         github_app_id=app_settings.github_app_id or None,
@@ -167,6 +199,13 @@ def system_status() -> SystemStatusOut:
         llm_provider=app_settings.llm_provider,
         app_env=app_settings.app_env,
         app_name=app_settings.app_name,
+        auth_required=auth_required,
+        github_oauth_configured=bool(
+            app_settings.github_app_client_id and app_settings.github_app_client_secret
+        ),
+        webhook_secret_configured=bool(app_settings.github_app_webhook_secret),
+        private_key_configured=key_path.exists(),
+        frontend_url=app_settings.frontend_url or None,
     )
 
 
@@ -178,7 +217,10 @@ def _get_config(db: Session) -> GeminiConfigOut:
 
 @router.get("/gemini", response_model=GeminiConfigOut)
 @router.get("/llm", response_model=GeminiConfigOut)
-def get_llm_config(db: Session = Depends(get_sync_db)) -> GeminiConfigOut:
+def get_llm_config(
+    db: Session = Depends(get_sync_db),
+    _: AuthContext = Depends(require_user),
+) -> GeminiConfigOut:
     return _get_config(db)
 
 
@@ -273,6 +315,8 @@ def update_llm_config(
     for field in (
         "primary_model",
         "embedding_model",
+        "triage_model",
+        "verify_model",
         "temperature",
         "max_output_tokens",
         "auto_review_enabled",
@@ -281,10 +325,16 @@ def update_llm_config(
         "max_files_per_review",
         "context_retrieval_limit",
         "monthly_budget_usd",
+        "block_on_secrets",
+        "block_on_critical",
+        "require_spider_check",
     ):
         value = getattr(body, field)
         if value is not None:
             setattr(config, field, value)
+
+    if body.policy_pack is not None:
+        config.policy_pack = normalize_policy_pack(body.policy_pack)
 
     db.flush()
     return _config_to_out(db, config)

@@ -12,8 +12,9 @@ Most AI reviewers flood PRs with noise. Spider is built around a different bar:
 
 - **Precision over volume** — findings must clear severity, confidence, failure-scenario, and independent verification gates
 - **Context-aware** — Tree-sitter symbols + embeddings retrieve the right code, not just the diff hunk
-- **Human-in-the-loop learning** — false-positive feedback raises the bar for noisy categories on future reviews
-- **Operator-ready** — budgets, audit logs, webhook DLQ, onboarding, and usage exports in one place
+- **Policy-as-code** — org rule packs and merge-blocking Check Runs for secrets / critical vulns
+- **Human-in-the-loop learning** — false-positive feedback raises the bar; scorecard + eval track precision over time
+- **Operator-ready** — SSO-gated dashboard, budgets, audit logs, webhook delivery metrics, onboarding wizard
 
 ---
 
@@ -21,37 +22,49 @@ Most AI reviewers flood PRs with noise. Spider is built around a different bar:
 
 ### AI review pipeline
 - Multi-stage LangGraph flow: **analyze → retrieve → bug/security/test hunt → verify → decide**
+- **Multi-LLM routing** — cheap triage model for analyze/hunt stages; stronger model for verify
 - Static analysis supplements (secrets, SQL concatenation) merged into the same publish gates
 - Optional isolated Docker sandbox for light verification annotations
 - Deduped per commit SHA; reclaim for stuck queued jobs
 - Manual triggers via dashboard, API, or PR comments (`/review`, `/review-again`)
+- Per-finding **decision traces** — why published vs rejected (gates, confidence floors, reasons)
 
 ### GitHub delivery
 - Inline review comments on the PR diff (no invented issues on clean PRs)
-- **Check Runs** with pass/fail — fails when published critical/high findings exist
-- Idempotent webhooks with HMAC verification, retries, dead-letter visibility, and admin replay
+- **Check Runs** with pass/fail — policy-as-code can fail on confirmed secrets and critical findings
+- **Branch protection helper** — one click to require the Spider Review check before merge
+- Idempotent webhooks with HMAC verification, retries, dead-letter visibility, admin replay, and **GitHub redelivery by delivery ID**
+
+### Policy & merge gates
+- Editable **org policy packs**: security policies, banned APIs, required tests
+- Toggles: `block_on_secrets`, `block_on_critical`, `require_spider_check`
+- Policy section injected into security and test agents during review
 
 ### Repository intelligence
 - Clone/fetch via GitHub App installation tokens
-- Tree-sitter parsing for Python, JS/TS, Go, Rust, Java (+ optional C/C++/C#/Ruby/PHP/Kotlin)
+- Tree-sitter language packs baked into the backend image (Python, JS/TS, Go, Rust, Java, C/C++, C#, Ruby, PHP, Kotlin)
 - Chunking, embeddings, and **pgvector** retrieval for context
-- Full and **incremental** re-index with live progress (`files_processed` / `total_files`)
+- Full and **incremental** re-index with live progress; **parallel embed batches** and reuse of unchanged chunk vectors
 - Per-repo **review rules**: ignore paths, severity/confidence floors, language allow-lists, max findings
 
-### Precision & feedback
+### Precision, feedback & eval
 - Org and per-repo severity / confidence thresholds
 - Feedback types: helpful, false positive, dismissed, fixed
 - Aggregated FP rates by **category and path** injected into verifier LLM prompts
 - Feedback-adjusted confidence floors before publish
+- **Quality scorecard** — precision, FP rate, time-to-first-comment per repo
+- **Eval harness** — weekly precision / recall-proxy series from labeled feedback (close the loop at scale)
 
 ### Dashboard
 - Overview metrics, repositories, pull requests, review detail, usage & cost charts
-- Settings for LLM provider (Gemini or LiteLLM), budgets, and review defaults
-- **Onboarding** checklist: install app → configure LLM → sync → index → first review
-- **Audit & observability**: action log, week metrics, webhook DLQ replay
+- Settings for LLM provider, **triage/verify models**, budgets, policy packs, and review defaults
+- **First-run wizard** that auto-detects missing App / OAuth / LLM key / webhook tunnel
+- **Webhook delivery** page — latency, success rate, replay, GitHub redeliver
+- **Audit & observability**: action log, week metrics, DLQ
 - CSV exports for findings and usage
-- Light / dark theme (slate + indigo design system)
+- Light / dark theme (slate + indigo); **mobile-friendly** shell with drawer nav
 - GitHub OAuth SSO with org roles (`admin` / `member` / `viewer`); org switcher when multi-tenant
+- Entire dashboard gated behind login when auth is required (staging/production force SSO)
 
 ### Cost & reliability
 - BYOK Gemini (encrypted at rest) or LiteLLM OpenAI-compatible proxy
@@ -119,7 +132,9 @@ GitHub PR / webhook
 - Webhook HMAC (`X-Hub-Signature-256`) required in production
 - Sandbox: read-only, non-root, no network, CPU/memory/PID limits
 - Monthly budget gate before expensive review work
-- Role-gated mutating APIs (`admin` / `member`); development may use auth bypass via `AUTH_DISABLED_IN_DEV`
+- Role-gated APIs (`admin` / `member` / viewer reads); dashboard AuthGate when `auth_required`
+- **Staging/production always force GitHub SSO** — `AUTH_DISABLED_IN_DEV` is ignored outside development
+- Set `REQUIRE_AUTH=true` to force SSO even in local development
 
 ---
 
@@ -133,7 +148,7 @@ backend/app/
   agents/         # LangGraph multi-stage review + verifier
   verification/   # static analysis + sandbox
   services/       # review orchestration, LLM clients, feedback signals, audit
-frontend/app/     # Dashboard (overview, repos, PRs, analytics, settings, audit, onboarding)
+frontend/app/     # Dashboard (overview, repos, PRs, analytics, settings, audit, onboarding, webhooks)
 samples/          # Intentional buggy repo for pipeline validation
 litellm/          # Optional LiteLLM proxy config
 ```
@@ -220,13 +235,15 @@ https://<your-tunnel-host>/api/webhooks/github
 2. Events: `pull_request`, `installation`, `installation_repositories`, `issue_comment`, `check_run` (as needed)
 3. Install the app on your org/user
 4. In the dashboard → **Repositories** → **Sync**, then **Re-index**
-5. Optional: **Onboarding** page walks install → LLM → sync → index → first review
+5. Optional: **Onboarding** wizard auto-detects missing App / key / tunnel, then walks sync → index → first review
+6. Optional: **Protect** on a repository to require the Spider Review Check Run before merge
 
-### 5. Configure the LLM
+### 5. Configure the LLM & policy
 
 - Open **Settings** and choose **Gemini** (default) or **LiteLLM**
-- Paste a key, set models, validate connection
+- Paste a key, set primary / **triage** / **verify** models, validate connection
 - Adjust severity / confidence thresholds and monthly budget
+- Edit the **org policy pack** (security policies, banned APIs, required tests) and merge-block toggles
 
 ### 6. Trigger a review
 
@@ -238,6 +255,8 @@ https://<your-tunnel-host>/api/webhooks/github
 curl -X POST "http://localhost:8000/api/pull-requests/<pr-uuid>/review"
 ```
 
+Inspect **why published / why rejected** on the review detail page; track precision on **Usage & Cost** (scorecard + eval).
+
 ### 7. Tests
 
 ```bash
@@ -248,7 +267,7 @@ Sample intentional bugs live in `samples/buggy_repo/` (SQL injection, hardcoded 
 
 ### Dev auth note
 
-With `APP_ENV=development` and `AUTH_DISABLED_IN_DEV=true`, the API allows a local admin bypass so you can use the dashboard without OAuth. For real SSO, set GitHub OAuth client credentials, `FRONTEND_URL`, and sign in at `/login`.
+With `APP_ENV=development` and `AUTH_DISABLED_IN_DEV=true` (and `REQUIRE_AUTH=false`), the API allows a local admin bypass. Staging and production **always** require GitHub SSO. For real SSO locally, set OAuth client credentials, `FRONTEND_URL`, optionally `REQUIRE_AUTH=true`, and sign in at `/login`.
 
 ---
 

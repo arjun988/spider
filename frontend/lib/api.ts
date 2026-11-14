@@ -102,6 +102,8 @@ export interface GeminiConfig {
   litellm_base_url: string | null;
   primary_model: string;
   embedding_model: string;
+  triage_model?: string | null;
+  verify_model?: string | null;
   temperature: number;
   max_output_tokens: number;
   auto_review_enabled: boolean;
@@ -115,6 +117,15 @@ export interface GeminiConfig {
     spent_usd?: number;
     remaining_usd?: number;
   } | null;
+  policy_pack?: {
+    banned_apis?: string[];
+    required_tests?: string[];
+    security_policies?: string[];
+    notes?: string;
+  } | null;
+  block_on_secrets?: boolean;
+  block_on_critical?: boolean;
+  require_spider_check?: boolean;
 }
 
 export interface SystemStatus {
@@ -125,6 +136,11 @@ export interface SystemStatus {
   llm_provider?: string;
   app_env: string;
   app_name: string;
+  auth_required?: boolean;
+  github_oauth_configured?: boolean;
+  webhook_secret_configured?: boolean;
+  private_key_configured?: boolean;
+  frontend_url?: string | null;
 }
 
 export interface HealthResponse {
@@ -269,10 +285,63 @@ export const api = {
         retry_count: number;
         error_message: string | null;
         dead_lettered_at: string | null;
+        created_at?: string | null;
+        processed_at?: string | null;
+        latency_ms?: number | null;
       }>;
     }>(`/api/admin/webhooks${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  webhookMetrics: (days = 7) =>
+    request<{
+      days: number;
+      total: number;
+      processed: number;
+      failed: number;
+      success_rate: number | null;
+      avg_latency_ms: number | null;
+      p95_latency_ms: number | null;
+      by_event_type: Record<string, number>;
+    }>(`/api/admin/webhooks/metrics?days=${days}`),
   replayWebhook: (id: string) =>
     request(`/api/admin/webhooks/${id}/replay`, { method: "POST" }),
+  redeliverWebhook: (deliveryId: string) =>
+    request(`/api/admin/webhooks/redeliver/${encodeURIComponent(deliveryId)}`, {
+      method: "POST",
+    }),
+  scorecard: (days = 30) =>
+    request<{
+      days: number;
+      org: {
+        precision: number | null;
+        fp_rate: number | null;
+        labeled_findings: number;
+        avg_time_to_first_comment_ms: number | null;
+      };
+      by_repository: Array<{
+        repository_id: string;
+        repository: string;
+        precision: number | null;
+        fp_rate: number | null;
+        time_to_first_comment_ms: number | null;
+        labeled: number;
+      }>;
+    }>(`/api/analytics/scorecard?days=${days}`),
+  evalHarness: (days = 90) =>
+    request<{
+      days: number;
+      series: Array<{
+        week: string;
+        precision: number;
+        recall_proxy: number;
+        tp: number;
+        fp: number;
+      }>;
+      note: string;
+    }>(`/api/analytics/eval?days=${days}`),
+  enableBranchProtection: (repoId: string, branch?: string) =>
+    request<{ status: string; branch: string; required_contexts: string[] }>(
+      `/api/repositories/${repoId}/branch-protection${branch ? `?branch=${encodeURIComponent(branch)}` : ""}`,
+      { method: "POST" },
+    ),
   exportFindingsUrl: (days = 30) => `${API_URL}/api/exports/findings.csv?days=${days}`,
   exportUsageUrl: (days = 30) => `${API_URL}/api/exports/usage.csv?days=${days}`,
 };
@@ -293,6 +362,13 @@ export interface ReviewFinding {
   verification_status: string;
   published: boolean;
   rejected_reason: string | null;
+  decision_trace?: {
+    outcome?: string;
+    reason?: string;
+    gates?: string[];
+    policy_hits?: string[];
+    feedback_confidence_floor?: number | null;
+  } | null;
 }
 
 export interface ReviewDetail {

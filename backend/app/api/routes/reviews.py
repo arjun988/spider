@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.routes.github import get_sync_db
-from app.core.security import require_admin_token
+from app.core.security import AuthContext, require_admin_token, require_user
 from app.models.pull_request import PullRequest
 from app.models.repository import Repository
 from app.models.review import ReviewFeedback, ReviewFinding, ReviewJob
@@ -36,6 +36,7 @@ class FindingOut(BaseModel):
     verification_status: str
     published: bool
     rejected_reason: str | None
+    decision_trace: dict[str, Any] | None = None
 
     model_config = {"from_attributes": True}
 
@@ -99,7 +100,11 @@ def _enrich_review(db: Session, job: ReviewJob) -> ReviewJobOut:
 
 
 @router.get("/by-pr/{pr_id}", response_model=list[ReviewJobOut])
-def list_reviews_for_pr(pr_id: uuid.UUID, db: Session = Depends(get_sync_db)) -> list[ReviewJobOut]:
+def list_reviews_for_pr(
+    pr_id: uuid.UUID,
+    db: Session = Depends(get_sync_db),
+    _: AuthContext = Depends(require_user),
+) -> list[ReviewJobOut]:
     jobs = db.execute(
         select(ReviewJob)
         .where(ReviewJob.pull_request_id == pr_id)
@@ -110,7 +115,11 @@ def list_reviews_for_pr(pr_id: uuid.UUID, db: Session = Depends(get_sync_db)) ->
 
 
 @router.get("/{review_id}", response_model=ReviewJobOut)
-def get_review(review_id: uuid.UUID, db: Session = Depends(get_sync_db)) -> ReviewJobOut:
+def get_review(
+    review_id: uuid.UUID,
+    db: Session = Depends(get_sync_db),
+    _: AuthContext = Depends(require_user),
+) -> ReviewJobOut:
     job = db.execute(
         select(ReviewJob)
         .where(ReviewJob.id == review_id)

@@ -28,6 +28,15 @@ export default function SettingsPage() {
   const [autoReview, setAutoReview] = useState(true);
   const [maxFiles, setMaxFiles] = useState("50");
   const [contextLimit, setContextLimit] = useState("20");
+  const [triageModel, setTriageModel] = useState("");
+  const [verifyModel, setVerifyModel] = useState("");
+  const [bannedApis, setBannedApis] = useState("");
+  const [requiredTests, setRequiredTests] = useState("");
+  const [securityPolicies, setSecurityPolicies] = useState("");
+  const [policyNotes, setPolicyNotes] = useState("");
+  const [blockSecrets, setBlockSecrets] = useState(true);
+  const [blockCritical, setBlockCritical] = useState(true);
+  const [requireSpiderCheck, setRequireSpiderCheck] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,6 +45,8 @@ export default function SettingsPage() {
     setLitellmBaseUrl(gemini.data.litellm_base_url || "");
     setPrimaryModel(gemini.data.primary_model);
     setEmbeddingModel(gemini.data.embedding_model);
+    setTriageModel(gemini.data.triage_model || "");
+    setVerifyModel(gemini.data.verify_model || "");
     setTemperature(String(gemini.data.temperature));
     setMaxTokens(String(gemini.data.max_output_tokens));
     setBudget(String(gemini.data.monthly_budget_usd));
@@ -44,6 +55,14 @@ export default function SettingsPage() {
     setAutoReview(gemini.data.auto_review_enabled);
     setMaxFiles(String(gemini.data.max_files_per_review));
     setContextLimit(String(gemini.data.context_retrieval_limit));
+    const pack = gemini.data.policy_pack;
+    setBannedApis((pack?.banned_apis || []).join("\n"));
+    setRequiredTests((pack?.required_tests || []).join("\n"));
+    setSecurityPolicies((pack?.security_policies || []).join("\n"));
+    setPolicyNotes(pack?.notes || "");
+    setBlockSecrets(gemini.data.block_on_secrets !== false);
+    setBlockCritical(gemini.data.block_on_critical !== false);
+    setRequireSpiderCheck(gemini.data.require_spider_check !== false);
   }, [gemini.data]);
 
   const save = useMutation({
@@ -54,6 +73,8 @@ export default function SettingsPage() {
         ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
         primary_model: primaryModel,
         embedding_model: embeddingModel,
+        triage_model: triageModel.trim() || null,
+        verify_model: verifyModel.trim() || null,
         temperature: Number(temperature),
         max_output_tokens: Number(maxTokens),
         monthly_budget_usd: Number(budget),
@@ -62,6 +83,15 @@ export default function SettingsPage() {
         auto_review_enabled: autoReview,
         max_files_per_review: Number(maxFiles),
         context_retrieval_limit: Number(contextLimit),
+        block_on_secrets: blockSecrets,
+        block_on_critical: blockCritical,
+        require_spider_check: requireSpiderCheck,
+        policy_pack: {
+          banned_apis: bannedApis.split("\n").map((s) => s.trim()).filter(Boolean),
+          required_tests: requiredTests.split("\n").map((s) => s.trim()).filter(Boolean),
+          security_policies: securityPolicies.split("\n").map((s) => s.trim()).filter(Boolean),
+          notes: policyNotes,
+        },
         validate_key: true,
       }),
     onSuccess: () => {
@@ -246,6 +276,24 @@ export default function SettingsPage() {
             <input className={inputClass} value={embeddingModel} onChange={(e) => setEmbeddingModel(e.target.value)} />
           </label>
           <label className="text-xs text-muted-foreground">
+            Triage model (cheap)
+            <input
+              className={inputClass}
+              placeholder="defaults to primary"
+              value={triageModel}
+              onChange={(e) => setTriageModel(e.target.value)}
+            />
+          </label>
+          <label className="text-xs text-muted-foreground">
+            Verify model (stronger)
+            <input
+              className={inputClass}
+              placeholder="defaults to primary"
+              value={verifyModel}
+              onChange={(e) => setVerifyModel(e.target.value)}
+            />
+          </label>
+          <label className="text-xs text-muted-foreground">
             Temperature
             <input className={inputClass} value={temperature} onChange={(e) => setTemperature(e.target.value)} />
           </label>
@@ -300,6 +348,67 @@ export default function SettingsPage() {
               {validate.isPending ? "Testing…" : "Test connection"}
             </Button>
             {message ? <p className="text-xs text-muted-foreground">{message}</p> : null}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Org policy pack</CardTitle>
+          <CardDescription>
+            Security policies, banned APIs, and required tests applied during review. Policy-as-code
+            can fail the Spider Check Run on secrets / critical findings.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <label className="text-xs text-muted-foreground sm:col-span-2">
+            Security policies (one per line)
+            <textarea
+              className={`${inputClass} min-h-[88px]`}
+              value={securityPolicies}
+              onChange={(e) => setSecurityPolicies(e.target.value)}
+            />
+          </label>
+          <label className="text-xs text-muted-foreground">
+            Banned APIs / patterns
+            <textarea
+              className={`${inputClass} min-h-[88px]`}
+              value={bannedApis}
+              onChange={(e) => setBannedApis(e.target.value)}
+            />
+          </label>
+          <label className="text-xs text-muted-foreground">
+            Required tests
+            <textarea
+              className={`${inputClass} min-h-[88px]`}
+              value={requiredTests}
+              onChange={(e) => setRequiredTests(e.target.value)}
+            />
+          </label>
+          <label className="text-xs text-muted-foreground sm:col-span-2">
+            Notes
+            <input className={inputClass} value={policyNotes} onChange={(e) => setPolicyNotes(e.target.value)} />
+          </label>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input type="checkbox" checked={blockSecrets} onChange={(e) => setBlockSecrets(e.target.checked)} />
+            Block merge on confirmed secrets
+          </label>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input type="checkbox" checked={blockCritical} onChange={(e) => setBlockCritical(e.target.checked)} />
+            Block merge on critical findings
+          </label>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={requireSpiderCheck}
+              onChange={(e) => setRequireSpiderCheck(e.target.checked)}
+            />
+            Require Spider Check Run (branch protection helper)
+          </label>
+          <div className="sm:col-span-2">
+            <Button onClick={() => save.mutate()} disabled={save.isPending}>
+              Save policy pack
+            </Button>
           </div>
         </CardContent>
       </Card>

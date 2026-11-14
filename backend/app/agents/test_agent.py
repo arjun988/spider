@@ -24,15 +24,18 @@ def review_tests(
     organization_id=None,
     review_job_id=None,
     repository_id=None,
+    policy_section: str | None = None,
 ) -> tuple[list[FindingDraft], dict]:
+    policy_block = f"\n{policy_section}\n" if policy_section else ""
     prompt = f"""Change summary: {change_summary}
-
+{policy_block}
 Files:
 {json.dumps(files[:40], default=str)[:20000]}
 
 Context (may include existing tests):
 {json.dumps(contexts[:20], default=str)[:10000]}
 
+Honor required_tests from the org policy pack when listed.
 Return JSON {{"findings":[...]}} only for material coverage gaps on risky changes.
 """
     raw, meta = generate_json(

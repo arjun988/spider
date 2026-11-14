@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -47,6 +47,9 @@ class ModelConfiguration(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
         default="gemini-embedding-001",
     )
+    # Multi-LLM routing: cheap triage vs stronger verify (null = use primary_model)
+    triage_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    verify_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     temperature: Mapped[float] = mapped_column(Float, default=0.1, nullable=False)
     max_output_tokens: Mapped[int] = mapped_column(Integer, default=8192, nullable=False)
 
@@ -58,5 +61,12 @@ class ModelConfiguration(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     context_retrieval_limit: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
     monthly_budget_usd: Mapped[float] = mapped_column(Float, default=100.0, nullable=False)
     budget_alert_threshold: Mapped[float] = mapped_column(Float, default=0.8, nullable=False)
+
+    # Org policy pack + merge blocking
+    # { banned_apis: [], required_tests: [], security_policies: [], notes: "" }
+    policy_pack: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    block_on_secrets: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    block_on_critical: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    require_spider_check: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     organization: Mapped[Organization] = relationship(back_populates="model_config_rel")

@@ -6,6 +6,7 @@ import subprocess
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -109,8 +110,9 @@ def index_repository(db: Session, repository_id: str | uuid.UUID, full: bool = F
             allowed = {str(x).lower() for x in rules.enabled_languages}
             files = [f for f in files if (f.get("language") or "").lower() in allowed]
 
-        # Incremental: only reindex changed content hashes when not full
+        # Incremental: skip unchanged blobs aggressively (path + content hash)
         existing_hashes: dict[str, str] = {}
+        reusable_embeddings: dict[str, Any] = {}
         if job.job_type == "incremental" and repo.last_indexed_commit_sha:
             rows = db.execute(
                 select(RepositoryFile).where(
@@ -118,6 +120,16 @@ def index_repository(db: Session, repository_id: str | uuid.UUID, full: bool = F
                 )
             ).scalars().all()
             existing_hashes = {r.path: r.content_hash for r in rows}
+            # Cache embeddings for unchanged blob hashes so we skip re-embed
+            emb_rows = db.execute(
+                select(CodeChunk.content_hash, CodeChunk.embedding).where(
+                    CodeChunk.repository_id == repo.id,
+                    CodeChunk.embedding.is_not(None),
+                )
+            ).all()
+            for chash, emb in emb_rows:
+                if chash and emb is not None and chash not in reusable_embeddings:
+                    reusable_embeddings[chash] = emb
 
         changed_files = []
         for f in files:
@@ -242,19 +254,28 @@ def index_repository(db: Session, repository_id: str | uuid.UUID, full: bool = F
             if (idx + 1) % 5 == 0 or (idx + 1) == len(work_list):
                 db.flush()
 
-        # Embeddings
-        vectors: list[list[float]] = []
-        if chunk_payloads:
+        # Embed only chunks whose content hash is new; reuse prior vectors otherwise
+        need_embed_idx: list[int] = []
+        vectors: list[Any] = [None] * len(chunk_payloads)
+        for idx, ch in enumerate(chunk_payloads):
+            reused = reusable_embeddings.get(ch.content_hash)
+            if reused is not None:
+                vectors[idx] = reused
+            else:
+                need_embed_idx.append(idx)
+
+        if need_embed_idx:
             try:
-                vectors = embed_chunks(
-                    [c.content[:6000] for c in chunk_payloads],
+                fresh = embed_chunks(
+                    [chunk_payloads[i].content[:6000] for i in need_embed_idx],
                     db=db,
                     organization_id=repo.organization_id,
                     repository_id=repo.id,
                 )
+                for j, i in enumerate(need_embed_idx):
+                    vectors[i] = fresh[j] if j < len(fresh) else None
             except Exception as exc:
                 logger.warning("embedding_failed", error=str(exc))
-                vectors = [None] * len(chunk_payloads)  # type: ignore
 
         for idx, ch in enumerate(chunk_payloads):
             emb = vectors[idx] if idx < len(vectors) else None

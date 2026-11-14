@@ -23,6 +23,7 @@ from app.models.repository import Repository
 from app.models.review import ReviewFinding, ReviewJob, VerificationResult
 from app.services.feedback_signals import compute_feedback_signals
 from app.services.audit import emit_audit_sync
+from app.services.policy import evaluate_merge_block, policy_prompt_section
 from app.verification.static_analysis import scan_files
 from app.verification.test_runner import run_relevant_checks
 
@@ -220,6 +221,13 @@ def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
                 )
             )
 
+        cfg = db.execute(
+            select(ModelConfiguration).where(
+                ModelConfiguration.organization_id == repo.organization_id
+            )
+        ).scalar_one_or_none()
+        policy_section = policy_prompt_section(cfg.policy_pack if cfg else None)
+
         job.status = "detecting"
         db.flush()
         decision, usage, timeline = run_review_pipeline(
@@ -229,13 +237,9 @@ def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
             pr.body,
             files,
             review_job_id=job.id,
+            policy_section=policy_section,
         )
 
-        cfg = db.execute(
-            select(ModelConfiguration).where(
-                ModelConfiguration.organization_id == repo.organization_id
-            )
-        ).scalar_one_or_none()
         sev = (rules.severity_threshold if rules and rules.severity_threshold else None) or (
             cfg.severity_threshold if cfg else None
         )
@@ -297,6 +301,7 @@ def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
                 verification_status=draft.verification_status,
                 published=False,
                 rejected_reason=draft.rejected_reason,
+                decision_trace=draft.decision_trace,
             )
             db.add(finding)
             db.flush()
@@ -372,18 +377,18 @@ def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
             repo.prs_reviewed_count = (repo.prs_reviewed_count or 0) + 1
         repo.last_review_at = finished
 
-        # Check Run conclusion: fail on published critical/high
-        critical_high = sum(
-            1
-            for f in decision.findings
-            if f.should_publish and f.severity in {"critical", "high"}
+        # Policy-as-code Check Run conclusion
+        policy_result = evaluate_merge_block(
+            decision.findings,
+            block_on_secrets=bool(cfg.block_on_secrets) if cfg else True,
+            block_on_critical=bool(cfg.block_on_critical) if cfg else True,
         )
-        conclusion = "failure" if critical_high else "success"
+        conclusion = policy_result["conclusion"]
+        reason_bits = "; ".join(policy_result["reasons"]) if policy_result["reasons"] else "clean"
         check_summary = (
-            f"Published {job.published_count} finding(s). "
-            f"{critical_high} critical/high."
+            f"Published {job.published_count} finding(s). {reason_bits}."
             if job.published_count
-            else "No findings met publish thresholds."
+            else f"No findings met publish thresholds. {reason_bits}."
         )
         if job.github_check_run_id:
             try:
@@ -409,6 +414,7 @@ def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
                 "pr": pr.number,
                 "published": job.published_count,
                 "conclusion": conclusion,
+                "policy": policy_result["counts"],
             },
         )
         db.flush()

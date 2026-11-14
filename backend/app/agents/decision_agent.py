@@ -7,6 +7,7 @@ from typing import Any
 from app.agents.schemas import FindingDraft, ReviewDecision
 from app.core.config import settings
 from app.services.feedback_signals import effective_confidence_threshold, path_ignored
+from app.services.policy import build_decision_trace
 
 SEVERITY_RANK = {
     "informational": 0,
@@ -41,13 +42,25 @@ def prioritize_findings(
     published = 0
     rejected = 0
     for f in findings:
+        gates: list[str] = []
         if path_ignored(f.file_path, ignore_paths):
             f.should_publish = False
             f.rejected_reason = f.rejected_reason or "Path matched repository ignore rules"
+            f.decision_trace = build_decision_trace(
+                published=False,
+                rejected_reason=f.rejected_reason,
+                gates=["ignore_paths"],
+            )
             rejected += 1
             continue
         if f.verification_status == "rejected":
             f.should_publish = False
+            f.rejected_reason = f.rejected_reason or "Verifier rejected"
+            f.decision_trace = build_decision_trace(
+                published=False,
+                rejected_reason=f.rejected_reason,
+                gates=["verifier"],
+            )
             rejected += 1
             continue
         if f.verification_status in {"unverifiable", "skipped"}:
@@ -55,25 +68,57 @@ def prioritize_findings(
             f.confidence = min(f.confidence, 0.55)
             f.should_publish = False
             f.rejected_reason = f.rejected_reason or "Unverified — withheld for precision"
+            f.decision_trace = build_decision_trace(
+                published=False,
+                rejected_reason=f.rejected_reason,
+                gates=["verification_status"],
+            )
             rejected += 1
             continue
+        gates.append("verification")
         if SEVERITY_RANK.get(f.severity, 0) < min_rank:
             f.should_publish = False
             f.rejected_reason = f.rejected_reason or f"Below severity threshold ({sev_thresh})"
+            f.decision_trace = build_decision_trace(
+                published=False,
+                rejected_reason=f.rejected_reason,
+                gates=["severity_threshold"],
+            )
             rejected += 1
             continue
+        gates.append(f"severity>={sev_thresh}")
         cat_thresh = effective_confidence_threshold(conf_thresh, f.category, feedback_signals)
         if f.confidence < cat_thresh:
             f.should_publish = False
             f.rejected_reason = f.rejected_reason or f"Below confidence threshold ({cat_thresh:.2f})"
+            f.decision_trace = build_decision_trace(
+                published=False,
+                rejected_reason=f.rejected_reason,
+                gates=["confidence_threshold"],
+                feedback_floor=cat_thresh,
+            )
             rejected += 1
             continue
+        gates.append(f"confidence>={cat_thresh:.2f}")
         if not (f.failure_scenario or "").strip():
             f.should_publish = False
             f.rejected_reason = "Missing concrete failure scenario"
+            f.decision_trace = build_decision_trace(
+                published=False,
+                rejected_reason=f.rejected_reason,
+                gates=["failure_scenario"],
+            )
             rejected += 1
             continue
+        gates.append("failure_scenario")
         f.should_publish = True
+        f.rejected_reason = None
+        f.decision_trace = build_decision_trace(
+            published=True,
+            rejected_reason=None,
+            gates=gates,
+            feedback_floor=cat_thresh,
+        )
         published += 1
 
     # Sort publishable first by severity then confidence
@@ -94,6 +139,11 @@ def prioritize_findings(
             if kept > max_findings:
                 f.should_publish = False
                 f.rejected_reason = f.rejected_reason or f"Exceeded max_findings ({max_findings})"
+                f.decision_trace = build_decision_trace(
+                    published=False,
+                    rejected_reason=f.rejected_reason,
+                    gates=["max_findings"],
+                )
                 published -= 1
                 rejected += 1
 

@@ -198,3 +198,71 @@ class GitHubClient:
                 "summary": summary or "",
             }
         return self.patch(f"/repos/{owner}/{repo}/check-runs/{check_run_id}", json=payload)
+
+    def require_status_checks(
+        self,
+        owner: str,
+        repo: str,
+        branch: str,
+        *,
+        contexts: list[str] | None = None,
+        strict: bool = True,
+    ) -> dict[str, Any]:
+        """Require Spider Check Run (and optional contexts) before merge.
+
+        Uses GitHub branch protection required_status_checks. Creates or updates
+        protection with a minimal safe payload when none exists.
+        """
+        contexts = contexts or ["Spider Review"]
+        path = f"/repos/{owner}/{repo}/branches/{branch}/protection"
+        try:
+            existing = self.get(path)
+        except Exception:
+            existing = None
+
+        if existing:
+            payload = {
+                "required_status_checks": {
+                    "strict": strict,
+                    "contexts": contexts,
+                },
+                "enforce_admins": bool(
+                    (existing.get("enforce_admins") or {}).get("enabled", False)
+                ),
+                "required_pull_request_reviews": existing.get("required_pull_request_reviews"),
+                "restrictions": existing.get("restrictions"),
+            }
+            # GitHub expects null (not omit) to clear some nested objects; keep reviews if present
+            if payload["required_pull_request_reviews"] is None:
+                payload["required_pull_request_reviews"] = None
+            return self.put(path, json=payload)
+
+        return self.put(
+            path,
+            json={
+                "required_status_checks": {"strict": strict, "contexts": contexts},
+                "enforce_admins": False,
+                "required_pull_request_reviews": None,
+                "restrictions": None,
+            },
+        )
+
+    @staticmethod
+    def redeliver_webhook_delivery(delivery_id: str) -> dict[str, Any]:
+        """Ask GitHub to redeliver a webhook by delivery ID (App JWT)."""
+        from app.github.authentication import create_app_jwt
+
+        app_jwt = create_app_jwt()
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(
+                f"{API}/app/hook/deliveries/{delivery_id}/attempts",
+                headers={
+                    "Authorization": f"Bearer {app_jwt}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            if response.status_code == 204:
+                return {"status": "queued", "delivery_id": delivery_id}
+            response.raise_for_status()
+            return response.json() if response.content else {"status": "queued"}

@@ -38,16 +38,13 @@ export default function LoginPage() {
           </div>
         </div>
         <p className="text-[13px] leading-relaxed text-muted-foreground">
-          Sign in with GitHub to access org-scoped reviews, settings, and audit logs.
-          Local development can also use the open dashboard when auth is disabled.
+          Staging and production require GitHub SSO. Local development can bypass auth only when
+          AUTH_DISABLED_IN_DEV is enabled.
         </p>
         <Button className="w-full" onClick={startGithub} disabled={loading}>
           {loading ? "Redirecting…" : "Continue with GitHub"}
         </Button>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
-        <a href="/" className="block text-center text-[12px] text-muted-foreground hover:underline">
-          Continue to dashboard (dev)
-        </a>
       </div>
     </div>
   );

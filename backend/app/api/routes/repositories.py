@@ -269,3 +269,75 @@ def set_auto_review(
         metadata={"enabled": enabled},
     )
     return {"id": str(repo.id), "auto_review_enabled": repo.auto_review_enabled}
+
+
+@router.post("/{repository_id}/branch-protection")
+def enable_spider_branch_protection(
+    repository_id: uuid.UUID,
+    branch: str | None = None,
+    db: Session = Depends(get_sync_db),
+    auth: AuthContext = Depends(require_admin_token),
+) -> dict:
+    """Require the Spider Review Check Run to pass before merge."""
+    from app.models.github import GitHubInstallation
+    from app.github.client import GitHubClient
+    from app.models.settings import ModelConfiguration
+
+    repo = db.get(Repository, repository_id)
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    if auth.organization_id and repo.organization_id != auth.organization_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    cfg = db.execute(
+        select(ModelConfiguration).where(
+            ModelConfiguration.organization_id == repo.organization_id
+        )
+    ).scalar_one_or_none()
+    if cfg and not cfg.require_spider_check:
+        raise HTTPException(
+            status_code=400,
+            detail="require_spider_check is disabled in org settings",
+        )
+
+    installation = db.execute(
+        select(GitHubInstallation).where(
+            GitHubInstallation.organization_id == repo.organization_id,
+            GitHubInstallation.is_active.is_(True),
+        )
+    ).scalar_one_or_none()
+    if not installation:
+        raise HTTPException(status_code=400, detail="No active GitHub installation")
+
+    target_branch = branch or repo.default_branch or "main"
+    client = GitHubClient(installation.installation_id)
+    owner, name = repo.full_name.split("/", 1)
+    try:
+        result = client.require_status_checks(
+            owner,
+            name,
+            target_branch,
+            contexts=["Spider Review"],
+            strict=True,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"GitHub branch protection failed: {exc}",
+        ) from exc
+
+    emit_audit_sync(
+        db,
+        action="repository.branch_protection",
+        actor_user_id=auth.user_id,
+        organization_id=repo.organization_id,
+        resource_type="repository",
+        resource_id=str(repo.id),
+        metadata={"branch": target_branch, "contexts": ["Spider Review"]},
+    )
+    return {
+        "status": "ok",
+        "branch": target_branch,
+        "required_contexts": ["Spider Review"],
+        "protection": result,
+    }

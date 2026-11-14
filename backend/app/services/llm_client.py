@@ -107,6 +107,43 @@ def resolve_llm_config(db: Session | None = None, organization_id=None) -> LlmRu
     )
 
 
+def resolve_stage_config(
+    db: Session | None,
+    organization_id,
+    stage: str,
+) -> LlmRuntimeConfig:
+    """Pick triage vs verify model overrides for multi-LLM routing."""
+    cfg = resolve_llm_config(db, organization_id)
+    if db is None:
+        return cfg
+    q = db.query(ModelConfiguration)
+    if organization_id:
+        q = q.filter(ModelConfiguration.organization_id == organization_id)
+    row = q.first()
+    if not row:
+        return cfg
+    override = None
+    stage_l = (stage or "").lower()
+    if stage_l in {"verify", "verifier", "decide"}:
+        override = row.verify_model
+    elif stage_l in {
+        "triage",
+        "analyze",
+        "bug",
+        "bug_hunt",
+        "security",
+        "test",
+        "test_review",
+        "change_analyzer",
+        "bug_hunter",
+        "review",
+    }:
+        override = row.triage_model
+    if override:
+        cfg.primary_model = override
+    return cfg
+
+
 def generate_json(
     prompt: str,
     *,
@@ -117,8 +154,11 @@ def generate_json(
     repository_id=None,
     operation: str = "review",
     config: LlmRuntimeConfig | None = None,
+    model: str | None = None,
 ) -> tuple[dict[str, Any] | list[Any], dict[str, Any]]:
-    cfg = config or resolve_llm_config(db, organization_id)
+    cfg = config or resolve_stage_config(db, organization_id, operation)
+    if model:
+        cfg.primary_model = model
     if cfg.provider == "litellm":
         from app.services.litellm_client import generate_json_litellm
 

@@ -24,9 +24,11 @@ def review_security(
     organization_id=None,
     review_job_id=None,
     repository_id=None,
+    policy_section: str | None = None,
 ) -> tuple[list[FindingDraft], dict]:
+    policy_block = f"\n{policy_section}\n" if policy_section else ""
     prompt = f"""Change summary: {change_summary}
-
+{policy_block}
 Diff:
 {json.dumps(files[:40], default=str)[:25000]}
 
@@ -34,6 +36,7 @@ Context:
 {json.dumps(contexts[:20], default=str)[:12000]}
 
 Focus: authn/authz, injection, XSS, secrets, insecure deserialization, path traversal.
+Honor org policy pack (banned APIs, security policies) when present.
 
 Return JSON {{"findings":[...]}} with category "security". Empty list if none.
 """

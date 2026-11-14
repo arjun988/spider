@@ -112,7 +112,14 @@ async def get_auth_context(
             role=role,
         )
 
-    if settings.app_env == "development" and settings.auth_disabled_in_dev and not settings.is_production:
+    # Dev bypass: development only, never staging/production
+    allow_dev_bypass = (
+        settings.app_env == "development"
+        and settings.auth_disabled_in_dev
+        and not settings.require_auth
+        and not settings.is_production
+    )
+    if allow_dev_bypass:
         user, membership = await auth_service.ensure_dev_user(db)
         org_id = membership.organization_id if membership else None
         if x_organization_id:
@@ -128,9 +135,12 @@ async def get_auth_context(
             is_dev_bypass=True,
         )
 
+    detail = "Authentication required"
+    if settings.app_env in {"staging", "production"}:
+        detail = "Sign in with GitHub SSO is required in staging/production"
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Authentication required",
+        detail=detail,
     )
 
 

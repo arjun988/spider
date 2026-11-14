@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -43,9 +43,53 @@ def list_webhooks(
                 "error_message": r.error_message,
                 "dead_lettered_at": r.dead_lettered_at.isoformat() if r.dead_lettered_at else None,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
+                "processed_at": r.processed_at.isoformat() if r.processed_at else None,
+                "latency_ms": (
+                    int((r.processed_at - r.created_at).total_seconds() * 1000)
+                    if r.processed_at and r.created_at
+                    else None
+                ),
             }
             for r in rows
         ]
+    }
+
+
+@router.get("/metrics")
+def webhook_metrics(
+    days: int = Query(7, ge=1, le=90),
+    db: Session = Depends(get_sync_db),
+    auth: AuthContext = Depends(require_admin_token),
+) -> dict[str, Any]:
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = db.execute(
+        select(WebhookEvent).where(WebhookEvent.created_at >= since)
+    ).scalars().all()
+    total = len(rows)
+    processed = sum(1 for r in rows if r.status == "processed")
+    failed = sum(1 for r in rows if r.status in {"failed"} or r.dead_lettered_at)
+    latencies = [
+        int((r.processed_at - r.created_at).total_seconds() * 1000)
+        for r in rows
+        if r.processed_at and r.created_at
+    ]
+    avg_latency = sum(latencies) / len(latencies) if latencies else None
+    p95 = None
+    if latencies:
+        ordered = sorted(latencies)
+        p95 = ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))]
+    by_type: dict[str, int] = {}
+    for r in rows:
+        by_type[r.event_type] = by_type.get(r.event_type, 0) + 1
+    return {
+        "days": days,
+        "total": total,
+        "processed": processed,
+        "failed": failed,
+        "success_rate": round(processed / total, 4) if total else None,
+        "avg_latency_ms": round(avg_latency, 1) if avg_latency is not None else None,
+        "p95_latency_ms": p95,
+        "by_event_type": by_type,
     }
 
 
@@ -103,3 +147,28 @@ def replay_webhook(
             event.dead_lettered_at = datetime.now(timezone.utc)
         db.flush()
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/redeliver/{delivery_id}")
+def redeliver_from_github(
+    delivery_id: str,
+    db: Session = Depends(get_sync_db),
+    auth: AuthContext = Depends(require_admin_token),
+) -> dict[str, Any]:
+    """One-click GitHub redelivery by delivery ID."""
+    from app.github.client import GitHubClient
+
+    try:
+        result = GitHubClient.redeliver_webhook_delivery(delivery_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    emit_audit_sync(
+        db,
+        action="webhook.github_redeliver",
+        actor_user_id=auth.user_id,
+        organization_id=auth.organization_id,
+        resource_type="webhook_delivery",
+        resource_id=delivery_id,
+        metadata={},
+    )
+    return {"status": "queued", "delivery_id": delivery_id, "result": result}

@@ -82,6 +82,10 @@ export default function RepositoriesPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["repositories"] }),
   });
 
+  const protectBranch = useMutation({
+    mutationFn: (id: string) => api.enableBranchProtection(id),
+  });
+
   const syncRepos = useMutation({
     mutationFn: async (installationId: number) => {
       const res = await fetch(
@@ -268,6 +272,15 @@ export default function RepositoriesPage() {
                             </Button>
                             <Button size="sm" variant="ghost" onClick={() => openRules(repo.id)}>
                               Rules
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => protectBranch.mutate(repo.id)}
+                              disabled={protectBranch.isPending}
+                              title="Require Spider Review check before merge"
+                            >
+                              Protect
                             </Button>
                             <Button
                               size="sm"

@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.routes.github import get_sync_db
-from app.core.security import require_admin_token
+from app.core.security import AuthContext, require_admin_token, require_user
 from app.models.pull_request import PullRequest
 from app.models.repository import Repository
 from app.models.review import ReviewJob
@@ -62,6 +62,7 @@ def list_pull_requests(
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_sync_db),
+    _: AuthContext = Depends(require_user),
 ) -> PullRequestListResponse:
     query = select(PullRequest).order_by(PullRequest.created_at.desc())
     if repository_id:
@@ -88,7 +89,11 @@ def list_pull_requests(
 
 
 @router.get("/{pr_id}", response_model=PullRequestOut)
-def get_pull_request(pr_id: uuid.UUID, db: Session = Depends(get_sync_db)) -> PullRequestOut:
+def get_pull_request(
+    pr_id: uuid.UUID,
+    db: Session = Depends(get_sync_db),
+    _: AuthContext = Depends(require_user),
+) -> PullRequestOut:
     pr = db.get(PullRequest, pr_id)
     if not pr:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pull request not found")

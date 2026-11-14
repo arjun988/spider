@@ -167,19 +167,19 @@ def embed_texts(
         return []
     cfg = config or resolve_gemini_config(db, organization_id)
     client = _client(cfg.api_key)
-    vectors: list[list[float]] = []
-    # Batch in small groups
-    batch_size = 16
-    total_tokens = 0
+    vectors: list[list[float] | None] = [None] * len(texts)
+    # Larger batches + parallel workers for indexing throughput
+    batch_size = 32
+    max_workers = 4
     dim = settings.gemini_embedding_dimensions
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i : i + batch_size]
+    batches = [(i, texts[i : i + batch_size]) for i in range(0, len(texts), batch_size)]
+
+    def _embed_batch(start_idx: int, batch: list[str]) -> tuple[int, list[list[float]], int, int]:
         started = time.time()
         embed_kwargs: dict[str, Any] = {
             "model": cfg.embedding_model,
             "contents": batch,
         }
-        # Newer Gemini embedding models default to 3072-d; request DB width explicitly.
         try:
             from google.genai import types
 
@@ -205,6 +205,7 @@ def embed_texts(
             assert last_exc is not None
             raise last_exc
         latency_ms = int((time.time() - started) * 1000)
+        out: list[list[float]] = []
         embeddings = getattr(result, "embeddings", None) or []
         for emb in embeddings:
             values = list(getattr(emb, "values", []) or [])
@@ -212,26 +213,37 @@ def embed_texts(
                 values = values + [0.0] * (dim - len(values))
             elif len(values) > dim:
                 values = values[:dim]
-            vectors.append(values)
-            total_tokens += max(1, len(batch[0]) // 4) if batch else 0
+            out.append(values)
+        tokens = sum(max(1, len(t) // 4) for t in batch)
+        return start_idx, out, tokens, latency_ms
 
-        cost = estimate_cost(cfg.embedding_model, total_tokens, 0)
-        if db is not None and cfg.organization_id:
-            db.add(
-                ApiUsageRecord(
-                    organization_id=cfg.organization_id,
-                    repository_id=repository_id,
-                    model_name=cfg.embedding_model,
-                    operation="embed",
-                    input_tokens=total_tokens,
-                    output_tokens=0,
-                    total_tokens=total_tokens,
-                    estimated_cost_usd=cost,
-                    latency_ms=latency_ms,
-                    success=True,
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    total_tokens = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(_embed_batch, start, batch) for start, batch in batches]
+        for fut in as_completed(futures):
+            start_idx, out, tokens, latency_ms = fut.result()
+            total_tokens += tokens
+            for offset, values in enumerate(out):
+                vectors[start_idx + offset] = values
+            if db is not None and cfg.organization_id:
+                cost = estimate_cost(cfg.embedding_model, tokens, 0)
+                db.add(
+                    ApiUsageRecord(
+                        organization_id=cfg.organization_id,
+                        repository_id=repository_id,
+                        model_name=cfg.embedding_model,
+                        operation="embed",
+                        input_tokens=tokens,
+                        output_tokens=0,
+                        total_tokens=tokens,
+                        estimated_cost_usd=cost,
+                        latency_ms=latency_ms,
+                        success=True,
+                    )
                 )
-            )
-    return vectors
+    return [v or [0.0] * dim for v in vectors]
 
 
 def _response_text(response: Any) -> str:

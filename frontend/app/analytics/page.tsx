@@ -31,12 +31,14 @@ const tooltipStyle = {
 export default function AnalyticsPage() {
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
   const usage = useQuery({ queryKey: ["usage"], queryFn: () => api.usage(30) });
+  const scorecard = useQuery({ queryKey: ["scorecard"], queryFn: () => api.scorecard(30) });
+  const evalData = useQuery({ queryKey: ["eval"], queryFn: () => api.evalHarness(90) });
   const m = overview.data?.metrics;
 
   return (
     <Shell
       title="Usage & Cost"
-      description="API expenditure derived from recorded usage events."
+      description="Spend, review quality scorecard, and precision/recall eval over labeled feedback."
       breadcrumb="Workspace"
       actions={
         <>
@@ -85,6 +87,114 @@ export default function AnalyticsPage() {
             }
           />
         </div>
+      </section>
+
+      <section className="space-y-3">
+        <div>
+          <p className="eyebrow">Quality</p>
+          <h2 className="section-title">Review scorecard</h2>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard
+            label="Precision"
+            value={
+              scorecard.data?.org.precision != null
+                ? `${(scorecard.data.org.precision * 100).toFixed(1)}%`
+                : "—"
+            }
+            tone="accent"
+          />
+          <StatCard
+            label="FP rate"
+            value={
+              scorecard.data?.org.fp_rate != null
+                ? `${(scorecard.data.org.fp_rate * 100).toFixed(1)}%`
+                : "—"
+            }
+            tone="warning"
+          />
+          <StatCard
+            label="Labeled findings"
+            value={scorecard.data?.org.labeled_findings ?? "—"}
+          />
+          <StatCard
+            label="Avg time to comment"
+            value={
+              scorecard.data?.org.avg_time_to_first_comment_ms != null
+                ? `${Math.round(scorecard.data.org.avg_time_to_first_comment_ms / 1000)}s`
+                : "—"
+            }
+          />
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Per repository</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-x-auto p-0">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Repository</th>
+                  <th>Precision</th>
+                  <th>FP rate</th>
+                  <th>Time to comment</th>
+                  <th>Labeled</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(scorecard.data?.by_repository ?? []).length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="!text-muted-foreground">
+                      Label findings as helpful / false positive to populate the scorecard.
+                    </td>
+                  </tr>
+                ) : (
+                  scorecard.data!.by_repository.map((row) => (
+                    <tr key={row.repository_id}>
+                      <td className="text-[13px]">{row.repository}</td>
+                      <td className="tabular-nums">
+                        {row.precision != null ? `${(row.precision * 100).toFixed(0)}%` : "—"}
+                      </td>
+                      <td className="tabular-nums">
+                        {row.fp_rate != null ? `${(row.fp_rate * 100).toFixed(0)}%` : "—"}
+                      </td>
+                      <td className="tabular-nums">
+                        {row.time_to_first_comment_ms != null
+                          ? `${Math.round(row.time_to_first_comment_ms / 1000)}s`
+                          : "—"}
+                      </td>
+                      <td className="tabular-nums">{row.labeled}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Eval harness (weekly)</CardTitle>
+          </CardHeader>
+          <CardContent className="h-64 pt-2">
+            {(evalData.data?.series?.length ?? 0) === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                {evalData.data?.note || "No labeled feedback yet — close the precision loop by rating findings."}
+              </p>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={evalData.data!.series}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--chart-grid))" />
+                  <XAxis dataKey="week" tick={{ fill: "hsl(var(--chart-tick))", fontSize: 11 }} />
+                  <YAxis domain={[0, 1]} tick={{ fill: "hsl(var(--chart-tick))", fontSize: 11 }} />
+                  <Tooltip contentStyle={tooltipStyle} />
+                  <Legend />
+                  <Line type="monotone" dataKey="precision" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="recall_proxy" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">

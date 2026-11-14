@@ -52,6 +52,7 @@ class FindingDraft(BaseModel):
     verification_status: VerificationStatus = "pending"
     should_publish: bool = False
     rejected_reason: str | None = None
+    decision_trace: dict[str, Any] | None = None
 
 
 class VerificationDecision(BaseModel):

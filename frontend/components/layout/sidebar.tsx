@@ -73,7 +73,7 @@ function NavItem({
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const pathname = usePathname();
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
@@ -112,7 +112,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-5">
+      <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-5" onClick={onNavigate}>
         <div>
           <p className="eyebrow mb-2.5 px-3">Workspace</p>
           <div className="space-y-1">
@@ -140,6 +140,12 @@ export function Sidebar() {
                 active={pathname.startsWith(item.href)}
               />
             ))}
+            <NavItem
+              href="/webhooks"
+              label="Webhooks"
+              icon={Activity}
+              active={pathname.startsWith("/webhooks")}
+            />
           </div>
         </div>
       </nav>

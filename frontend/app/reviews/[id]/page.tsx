@@ -248,6 +248,30 @@ export default function ReviewDetailPage() {
                         Rejected: {f.rejected_reason}
                       </p>
                     ) : null}
+                    {f.decision_trace ? (
+                      <div className="mt-3 rounded-lg border border-border/80 bg-background/60 p-3">
+                        <p className="eyebrow mb-1">
+                          Why {f.decision_trace.outcome === "published" ? "published" : "rejected"}
+                        </p>
+                        <p className="text-[12px] leading-relaxed text-muted-foreground">
+                          {f.decision_trace.reason || "—"}
+                        </p>
+                        {(f.decision_trace.gates?.length ?? 0) > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {f.decision_trace.gates!.map((g) => (
+                              <Badge key={g} variant="muted">
+                                {g}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : null}
+                        {f.decision_trace.feedback_confidence_floor != null ? (
+                          <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+                            confidence floor {f.decision_trace.feedback_confidence_floor.toFixed(2)}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div className="mt-3 flex flex-wrap gap-1.5">
                       <Button
                         size="sm"

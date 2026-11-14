@@ -1,3 +1,5 @@
+import { authHeaders } from "@/lib/auth";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export class ApiError extends Error {
@@ -15,6 +17,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...authHeaders(),
       ...init?.headers,
     },
     cache: "no-store",
@@ -25,7 +28,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(res.status, body || res.statusText);
   }
 
-  return res.json() as Promise<T>;
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 export interface OverviewMetrics {
@@ -177,6 +183,98 @@ export const api = {
       reviews: Array<{ date: string; count: number }>;
       by_repository: Array<{ repository: string; cost_usd: number; reviews: number }>;
     }>(`/api/analytics/usage?days=${days}`),
+  me: () =>
+    request<{
+      id: string;
+      github_login: string;
+      name: string | null;
+      avatar_url: string | null;
+      organization_id: string | null;
+      role: string | null;
+      organizations: Array<{
+        id: string;
+        role: string;
+        name: string | null;
+        slug: string | null;
+        github_org_login: string | null;
+      }>;
+      dev_bypass?: boolean;
+    }>("/api/auth/me"),
+  githubLoginUrl: () => request<{ authorize_url: string }>("/api/auth/github/login"),
+  switchOrg: (organization_id: string) =>
+    request<{ access_token: string; organization_id: string; role: string }>(
+      `/api/auth/switch-org?organization_id=${encodeURIComponent(organization_id)}`,
+      { method: "POST" },
+    ),
+  getRepoRules: (id: string) =>
+    request<{
+      repository_id: string;
+      ignore_paths?: string[] | null;
+      severity_threshold?: string | null;
+      confidence_threshold?: number | null;
+      enabled_languages?: string[] | null;
+      max_findings?: number | null;
+    }>(`/api/repositories/${id}/rules`),
+  putRepoRules: (
+    id: string,
+    body: {
+      ignore_paths?: string[];
+      severity_threshold?: string | null;
+      confidence_threshold?: number | null;
+      enabled_languages?: string[];
+      max_findings?: number | null;
+    },
+  ) =>
+    request(`/api/repositories/${id}/rules`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  indexJobs: (id: string) =>
+    request<{
+      latest: {
+        id: string;
+        status: string;
+        files_processed: number;
+        total_files: number;
+        progress_pct: number;
+      } | null;
+    }>(`/api/repositories/${id}/index-jobs`),
+  auditLogs: (action?: string) =>
+    request<{
+      items: Array<{
+        id: string;
+        action: string;
+        actor_user_id: string | null;
+        resource_type: string | null;
+        resource_id: string | null;
+        metadata: Record<string, unknown> | null;
+        created_at: string | null;
+      }>;
+    }>(`/api/audit/logs${action ? `?action=${encodeURIComponent(action)}` : ""}`),
+  auditMetrics: () =>
+    request<{
+      reviews_started: number;
+      reviews_failed: number;
+      webhook_failures: number;
+      week_cost_usd: number;
+      cost_spike: boolean;
+    }>("/api/audit/metrics"),
+  listWebhooks: (status?: string) =>
+    request<{
+      items: Array<{
+        id: string;
+        delivery_id: string;
+        event_type: string;
+        status: string;
+        retry_count: number;
+        error_message: string | null;
+        dead_lettered_at: string | null;
+      }>;
+    }>(`/api/admin/webhooks${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  replayWebhook: (id: string) =>
+    request(`/api/admin/webhooks/${id}/replay`, { method: "POST" }),
+  exportFindingsUrl: (days = 30) => `${API_URL}/api/exports/findings.csv?days=${days}`,
+  exportUsageUrl: (days = 30) => `${API_URL}/api/exports/usage.csv?days=${days}`,
 };
 
 export interface ReviewFinding {

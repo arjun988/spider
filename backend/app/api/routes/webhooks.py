@@ -75,25 +75,50 @@ def _process_in_background(
     with SessionLocal() as db:
         try:
             result = process_webhook(db, event_type, action, delivery_id, payload)
-            # Soft errors (e.g. install race) stay retryable via GitHub redelivery.
+            # Persist soft failures so DLQ / replay can drain them.
             if isinstance(result, dict) and result.get("status") == "error":
-                db.rollback()
+                db.commit()
                 logger.warning(
-                    "webhook_soft_error_not_acked",
+                    "webhook_soft_error_persisted",
                     delivery_id=delivery_id,
                     reason=result.get("reason"),
                     github_event=event_type,
                 )
+                try:
+                    from app.workers.tasks import retry_failed_webhooks
+
+                    retry_failed_webhooks.apply_async(countdown=60)
+                except Exception:
+                    pass
                 return
             db.commit()
             _enqueue_from_result(result)
-        except Exception:
+        except Exception as exc:
             db.rollback()
             logger.exception(
                 "webhook_background_failed",
                 delivery_id=delivery_id,
                 github_event=event_type,
             )
+            # Best-effort persist failed row for dead-letter visibility
+            try:
+                from app.models.github import WebhookEvent
+                from sqlalchemy import select
+                from datetime import datetime, timezone
+
+                with SessionLocal() as db2:
+                    row = db2.execute(
+                        select(WebhookEvent).where(WebhookEvent.delivery_id == delivery_id)
+                    ).scalar_one_or_none()
+                    if row:
+                        row.status = "failed"
+                        row.error_message = str(exc)[:2000]
+                        row.retry_count = (row.retry_count or 0) + 1
+                        if row.retry_count >= 5:
+                            row.dead_lettered_at = datetime.now(timezone.utc)
+                        db2.commit()
+            except Exception:
+                pass
 
 
 @router.post("/github", response_model=WebhookAck)

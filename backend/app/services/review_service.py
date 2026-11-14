@@ -13,6 +13,7 @@ from app.agents.graph import run_review_pipeline
 from app.agents.schemas import FindingDraft
 from app.core.logging import get_logger
 from app.models.settings import ModelConfiguration
+from app.models.rules import RepositoryReviewRules
 from app.github.client import GitHubClient
 from app.github.pull_request_service import fetch_pr_diff_bundle
 from app.github.review_publisher import publish_review
@@ -20,6 +21,8 @@ from app.models.github import GitHubInstallation
 from app.models.pull_request import PullRequest
 from app.models.repository import Repository
 from app.models.review import ReviewFinding, ReviewJob, VerificationResult
+from app.services.feedback_signals import compute_feedback_signals
+from app.services.audit import emit_audit_sync
 from app.verification.static_analysis import scan_files
 from app.verification.test_runner import run_relevant_checks
 
@@ -151,6 +154,33 @@ def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
         raise RuntimeError(job.error_message)
 
     client = GitHubClient(installation.installation_id)
+    owner, name = repo.full_name.split("/", 1)
+    # GitHub Check Run — in progress
+    try:
+        if job.github_check_run_id:
+            client.update_check_run(
+                owner,
+                name,
+                int(job.github_check_run_id),
+                status="in_progress",
+                title="Spider review running",
+                summary="Analyzing pull request…",
+            )
+        else:
+            check = client.create_check_run(
+                owner,
+                name,
+                name="Spider Review",
+                head_sha=commit_sha,
+                status="in_progress",
+                title="Spider review running",
+                summary="Analyzing pull request…",
+            )
+            job.github_check_run_id = check.get("id")
+            db.flush()
+    except Exception as exc:
+        logger.warning("check_run_start_failed", error=str(exc))
+
     files = (job.change_summary or {}).get("files")
     if not files:
         bundle = fetch_pr_diff_bundle(client, repo, pr.number)
@@ -161,6 +191,11 @@ def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
             "head_sha": bundle["head_sha"],
         }
         db.flush()
+
+    rules = db.execute(
+        select(RepositoryReviewRules).where(RepositoryReviewRules.repository_id == repo.id)
+    ).scalar_one_or_none()
+    feedback_signals = compute_feedback_signals(db, repo.organization_id)
 
     try:
         # Static analysis supplements
@@ -196,20 +231,34 @@ def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
             review_job_id=job.id,
         )
 
-        # Merge static findings then re-apply publish thresholds
+        cfg = db.execute(
+            select(ModelConfiguration).where(
+                ModelConfiguration.organization_id == repo.organization_id
+            )
+        ).scalar_one_or_none()
+        sev = (rules.severity_threshold if rules and rules.severity_threshold else None) or (
+            cfg.severity_threshold if cfg else None
+        )
+        conf = (
+            rules.confidence_threshold
+            if rules and rules.confidence_threshold is not None
+            else (cfg.confidence_threshold if cfg else None)
+        )
+        ignore_paths = list(rules.ignore_paths or []) if rules else []
+        max_findings = rules.max_findings if rules else None
+
+        # Merge static findings then re-apply publish thresholds (repo rules override org)
         if static_drafts:
             decision.findings.extend(static_drafts)
-            cfg = db.execute(
-                select(ModelConfiguration).where(
-                    ModelConfiguration.organization_id == repo.organization_id
-                )
-            ).scalar_one_or_none()
-            decision = prioritize_findings(
-                decision.findings,
-                decision.summary.split("\n\n")[0] if decision.summary else (pr.title or ""),
-                severity_threshold=cfg.severity_threshold if cfg else None,
-                confidence_threshold=cfg.confidence_threshold if cfg else None,
-            )
+        decision = prioritize_findings(
+            decision.findings,
+            decision.summary.split("\n\n")[0] if decision.summary else (pr.title or ""),
+            severity_threshold=sev,
+            confidence_threshold=conf,
+            ignore_paths=ignore_paths,
+            max_findings=max_findings,
+            feedback_signals=feedback_signals,
+        )
 
         # Optional sandbox checks — annotate only, do not claim reproduction unless success
         job.status = "verifying"
@@ -280,7 +329,6 @@ def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
         db.flush()
         publishable = [f.model_dump() for f in decision.findings if f.should_publish]
         file_patches = {f.get("filename"): f.get("patch") for f in files}
-        owner, name = repo.full_name.split("/", 1)
         pub = publish_review(
             client,
             owner,
@@ -323,6 +371,46 @@ def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
         if first_completion:
             repo.prs_reviewed_count = (repo.prs_reviewed_count or 0) + 1
         repo.last_review_at = finished
+
+        # Check Run conclusion: fail on published critical/high
+        critical_high = sum(
+            1
+            for f in decision.findings
+            if f.should_publish and f.severity in {"critical", "high"}
+        )
+        conclusion = "failure" if critical_high else "success"
+        check_summary = (
+            f"Published {job.published_count} finding(s). "
+            f"{critical_high} critical/high."
+            if job.published_count
+            else "No findings met publish thresholds."
+        )
+        if job.github_check_run_id:
+            try:
+                client.update_check_run(
+                    owner,
+                    name,
+                    int(job.github_check_run_id),
+                    status="completed",
+                    conclusion=conclusion,
+                    title="Spider review complete",
+                    summary=check_summary,
+                )
+            except Exception as exc:
+                logger.warning("check_run_complete_failed", error=str(exc))
+
+        emit_audit_sync(
+            db,
+            action="review.completed",
+            organization_id=repo.organization_id,
+            resource_type="review_job",
+            resource_id=str(job.id),
+            metadata={
+                "pr": pr.number,
+                "published": job.published_count,
+                "conclusion": conclusion,
+            },
+        )
         db.flush()
 
         logger.info(
@@ -338,8 +426,23 @@ def run_review_job(db: Session, pull_request_id: str, commit_sha: str) -> dict:
             "findings": job.findings_count,
             "cost_usd": job.estimated_cost_usd,
             "github_review_id": job.github_review_id,
+            "github_check_run_id": job.github_check_run_id,
+            "check_conclusion": conclusion,
         }
     except Exception:
+        if job.github_check_run_id:
+            try:
+                client.update_check_run(
+                    owner,
+                    name,
+                    int(job.github_check_run_id),
+                    status="completed",
+                    conclusion="neutral",
+                    title="Spider review failed",
+                    summary="Review job failed — see Spider dashboard.",
+                )
+            except Exception:
+                pass
         # Caller rolls back then mark_review_failed persists status.
         logger.exception("review_failed", pr=pr.number)
         raise

@@ -71,6 +71,65 @@ def index_repository(self, repository_id: str, full: bool = False) -> dict:
             raise self.retry(exc=exc)
 
 
+@celery_app.task(name="spider.retry_failed_webhooks")
+def retry_failed_webhooks(limit: int = 20) -> dict:
+    """Replay failed webhook events that are not yet dead-lettered."""
+    from datetime import datetime, timezone
+    from sqlalchemy import select
+    from app.models.github import WebhookEvent
+    from app.github.webhook_handler import process_webhook
+    from app.api.routes.webhooks import _enqueue_from_result
+
+    SessionLocal = get_sync_session_factory()
+    assert SessionLocal is not None
+    replayed = 0
+    dead = 0
+    with SessionLocal() as db:
+        rows = db.execute(
+            select(WebhookEvent)
+            .where(
+                WebhookEvent.status == "failed",
+                WebhookEvent.dead_lettered_at.is_(None),
+                WebhookEvent.retry_count < 5,
+            )
+            .order_by(WebhookEvent.created_at.asc())
+            .limit(limit)
+        ).scalars().all()
+        for event in rows:
+            event.retry_count = (event.retry_count or 0) + 1
+            event.status = "processing"
+            db.flush()
+            try:
+                result = process_webhook(
+                    db,
+                    event.event_type,
+                    event.action,
+                    event.delivery_id,
+                    event.payload,
+                    reuse_event=event,
+                )
+                if isinstance(result, dict) and result.get("status") == "error":
+                    event.status = "failed"
+                    event.error_message = str(result.get("reason") or "error")
+                    if event.retry_count >= 5:
+                        event.dead_lettered_at = datetime.now(timezone.utc)
+                        dead += 1
+                else:
+                    event.status = "processed"
+                    event.processed_at = datetime.now(timezone.utc)
+                    _enqueue_from_result(result if isinstance(result, dict) else {})
+                    replayed += 1
+            except Exception as exc:
+                event.status = "failed"
+                event.error_message = str(exc)[:2000]
+                if event.retry_count >= 5:
+                    event.dead_lettered_at = datetime.now(timezone.utc)
+                    dead += 1
+                logger.warning("webhook_retry_failed", delivery_id=event.delivery_id, error=str(exc))
+        db.commit()
+    return {"replayed": replayed, "dead_lettered": dead}
+
+
 @celery_app.task(name="spider.review_pull_request", bind=True, max_retries=3, default_retry_delay=90)
 def review_pull_request(self, pull_request_id: str, commit_sha: str) -> dict:
     from app.services.cost_service import ensure_within_budget

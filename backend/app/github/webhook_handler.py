@@ -402,11 +402,19 @@ def process_webhook(
     action: str | None,
     delivery_id: str,
     payload: dict[str, Any],
+    *,
+    reuse_event: WebhookEvent | None = None,
 ) -> dict[str, Any]:
     installation_id = (payload.get("installation") or {}).get("id")
-    event = record_webhook_event(db, delivery_id, event_type, action, installation_id, payload)
-    if event is None:
-        return {"status": "duplicate", "delivery_id": delivery_id}
+    if reuse_event is not None:
+        event = reuse_event
+        event.payload = payload
+        event.event_type = event_type
+        event.action = action
+    else:
+        event = record_webhook_event(db, delivery_id, event_type, action, installation_id, payload)
+        if event is None:
+            return {"status": "duplicate", "delivery_id": delivery_id}
 
     event.status = "processing"
     db.flush()
@@ -432,6 +440,14 @@ def process_webhook(
         else:
             result = {"status": "ignored", "github_event": event_type}
 
+        if isinstance(result, dict) and result.get("status") == "error":
+            event.status = "failed"
+            event.error_message = str(result.get("reason") or "error")
+            event.retry_count = (event.retry_count or 0) + 1
+            event.processed_at = datetime.now(timezone.utc)
+            db.flush()
+            return result
+
         event.status = "processed"
         event.processed_at = datetime.now(timezone.utc)
         db.flush()
@@ -439,6 +455,7 @@ def process_webhook(
     except Exception as exc:
         event.status = "failed"
         event.error_message = str(exc)
+        event.retry_count = (event.retry_count or 0) + 1
         event.processed_at = datetime.now(timezone.utc)
         db.flush()
         logger.exception("webhook_processing_failed", delivery_id=delivery_id)

@@ -45,6 +45,22 @@ def _get_parser(language: str):
             "rust": tsrust.language(),
             "java": tsjava.language(),
         }
+        # Optional extra languages — ignore if packages not installed
+        for lang_name, module_name, attr in (
+            ("c", "tree_sitter_c", "language"),
+            ("cpp", "tree_sitter_cpp", "language"),
+            ("csharp", "tree_sitter_c_sharp", "language"),
+            ("ruby", "tree_sitter_ruby", "language"),
+            ("php", "tree_sitter_php", "language_php"),
+            ("kotlin", "tree_sitter_kotlin", "language"),
+        ):
+            try:
+                mod = __import__(module_name)
+                fn = getattr(mod, attr, None) or getattr(mod, "language", None)
+                if fn:
+                    mapping[lang_name] = fn()
+            except Exception:
+                pass
         lang_ptr = mapping.get(language)
         if language == "typescript" and language not in mapping:
             lang_ptr = tsts.language_typescript()
@@ -215,6 +231,19 @@ def parse_generic_braced(source: str, file_path: str, language: str) -> list[Sym
 def extract_symbols(source: str, file_path: str, language: str) -> list[SymbolInfo]:
     if language == "python":
         return parse_python(source, file_path)
-    if language in {"javascript", "typescript", "go", "rust", "java"}:
+    if language in {
+        "javascript",
+        "typescript",
+        "tsx",
+        "go",
+        "rust",
+        "java",
+        "c",
+        "cpp",
+        "csharp",
+        "ruby",
+        "php",
+        "kotlin",
+    }:
         return parse_generic_braced(source, file_path, language)
     return []

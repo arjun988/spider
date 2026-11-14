@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from app.models.github import GitHubInstallation
     from app.models.repository import Repository
     from app.models.settings import ModelConfiguration
+    from app.models.user import OrgMembership
 
 
 class Organization(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -35,5 +36,9 @@ class Organization(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     model_config_rel: Mapped[ModelConfiguration | None] = relationship(
         back_populates="organization",
         uselist=False,
+        cascade="all, delete-orphan",
+    )
+    memberships: Mapped[list[OrgMembership]] = relationship(
+        back_populates="organization",
         cascade="all, delete-orphan",
     )

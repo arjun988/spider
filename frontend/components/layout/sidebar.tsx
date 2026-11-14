@@ -1,19 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   Bug,
+  ClipboardList,
   GitPullRequest,
   LayoutDashboard,
   Moon,
+  Rocket,
   Settings,
   Hexagon,
   Sun,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/lib/theme";
+import { api } from "@/lib/api";
+import { setAccessToken, setOrgId } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 const workspace = [
@@ -23,7 +28,11 @@ const workspace = [
   { href: "/analytics", label: "Usage & Cost", icon: Activity },
 ];
 
-const system = [{ href: "/settings", label: "Settings", icon: Settings }];
+const system = [
+  { href: "/onboarding", label: "Onboarding", icon: Rocket },
+  { href: "/audit", label: "Audit", icon: ClipboardList },
+  { href: "/settings", label: "Settings", icon: Settings },
+];
 
 function NavItem({
   href,
@@ -66,7 +75,26 @@ function NavItem({
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { theme, toggleTheme } = useTheme();
+  const me = useQuery({
+    queryKey: ["me"],
+    queryFn: api.me,
+    retry: false,
+  });
+
+  async function onSwitchOrg(orgId: string) {
+    try {
+      const res = await api.switchOrg(orgId);
+      setAccessToken(res.access_token);
+      setOrgId(res.organization_id);
+      router.refresh();
+      window.location.reload();
+    } catch {
+      setOrgId(orgId);
+      window.location.reload();
+    }
+  }
 
   return (
     <aside className="flex h-screen w-[268px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
@@ -117,6 +145,31 @@ export function Sidebar() {
       </nav>
 
       <div className="space-y-3 border-t border-sidebar-border p-4">
+        {me.data?.organizations && me.data.organizations.length > 1 ? (
+          <select
+            className="w-full rounded-lg border border-input bg-background px-2 py-2 text-[12px]"
+            value={me.data.organization_id || me.data.organizations[0]?.id || ""}
+            onChange={(e) => onSwitchOrg(e.target.value)}
+          >
+            {me.data.organizations.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name || o.github_org_login || o.slug || o.id}
+              </option>
+            ))}
+          </select>
+        ) : null}
+        {me.data ? (
+          <p className="truncate px-1 text-[11px] text-muted-foreground">
+            @{me.data.github_login}
+            {me.data.role ? ` · ${me.data.role}` : ""}
+          </p>
+        ) : (
+          <Link href="/login">
+            <Button variant="outline" size="sm" className="w-full rounded-xl">
+              Sign in
+            </Button>
+          </Link>
+        )}
         <Button
           variant="outline"
           size="sm"

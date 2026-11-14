@@ -8,6 +8,9 @@ from app.models.pull_request import PullRequest, PullRequestCommit
 from app.models.review import ReviewJob, ReviewFinding, VerificationResult, ReviewFeedback
 from app.models.settings import ModelConfiguration
 from app.models.usage import ApiUsageRecord, CostRecord
+from app.models.user import User, OrgMembership, OAuthState
+from app.models.audit import AuditLog
+from app.models.rules import RepositoryReviewRules
 
 __all__ = [
     "Organization",
@@ -28,4 +31,9 @@ __all__ = [
     "ModelConfiguration",
     "ApiUsageRecord",
     "CostRecord",
+    "User",
+    "OrgMembership",
+    "OAuthState",
+    "AuditLog",
+    "RepositoryReviewRules",
 ]

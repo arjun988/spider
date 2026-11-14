@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     github_app_private_key_path: str = "./secrets/github-app.pem"
     github_app_webhook_secret: str = ""
     github_app_name: str = ""
+    frontend_url: str = "http://localhost:3000"
+    auth_jwt_ttl_hours: int = 72
+    sentry_dsn: str = ""
+    auth_disabled_in_dev: bool = True
 
     # LLM provider: gemini (default) | litellm
     llm_provider: Literal["gemini", "litellm"] = "gemini"
